@@ -35,12 +35,6 @@ target_include_directories(imgui PUBLIC
 # ImGui needs GLFW + OpenGL
 target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
 
-add_executable(app
-  frontend/main.cpp
-)
-
-target_link_libraries(app PRIVATE imgui glfw OpenGL::GL)
-
-if (APPLE)
-  target_link_libraries(app PRIVATE "-framework Cocoa" "-framework IOKit" "-framework CoreVideo")
-endif()
+# ---- Applications ----
+add_subdirectory(apps/gui)
+add_subdirectory(apps/cli)

@@ -1,0 +1,45 @@
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ---- CMake build outputs ----
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+CTestTestfile.cmake
+Makefile
+cmake_install.cmake
+compile_commands.json
+install_manifest.txt
+
+# ---- Compilers ----
+*.o
+*.obj
+*.lo
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.pdb
+*.idb
+*.ilk
+*.exp
+
+# ---- Logs ----
+*.log
+
+# ---- ImGui (optional generated artifacts) ----
+imgui.ini
+
+# ---- Packaging ----
+*.zip
+*.tar
+*.tar.gz

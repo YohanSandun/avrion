@@ -35,3 +35,25 @@ cmake --build build --target avr_cli
 ```bash
 cmake --build build --config Release
 ```
+
+## Testing
+
+### Build and run all tests
+
+```bash
+cmake --build build --target test_intel_hex_decoder
+ctest --test-dir build --output-on-failure
+```
+
+### Run a specific test suite
+
+```bash
+ctest --test-dir build --output-on-failure -R <test-name-pattern>
+```
+
+### Run tests in release mode
+
+```bash
+cmake --build build --config Release --target test_intel_hex_decoder
+ctest --test-dir build -C Release --output-on-failure
+```

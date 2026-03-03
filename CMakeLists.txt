@@ -38,6 +38,11 @@ target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
 # ---- Core library (shared emulator logic) ----
 add_library(avr_core STATIC
   apps/tools/intel_hex_decoder.cpp
+  src/cpu/avr_cpu.cpp
+  src/device/device.cpp
+  src/device/atmega328p.cpp
+  src/memory/memory_map.cpp
+  src/periph/gpio.cpp
 )
 
 target_include_directories(avr_core PUBLIC

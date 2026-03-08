@@ -1,4 +1,5 @@
 #include <iostream>
+#include <exception>
 #include "device/atmega328p.h"
 #include "intel_hex_decoder.h"
 
@@ -7,13 +8,23 @@
 #endif
 
 int main() {
-    avrion::ATmega328P dev;
+    try {
+        avrion::ATmega328P dev;
 
-    const std::vector<uint8_t> flash_data = IntelHexDecoder::decodeFile(BLINK_HEX_PATH);
-    dev.load_flash(0, flash_data.data(), flash_data.size());
-    dev.reset();
-   
+        const std::vector<uint8_t> flash_data = IntelHexDecoder::decodeFile(BLINK_HEX_PATH);
+        dev.load_flash(0, flash_data.data(), flash_data.size());
+        
+        dev.run_cycles(1000000);
 
-    std::cout << "Program Loaded!" << std::endl;
-    return 0;
+        dev.reset();
+
+        std::cout << "Program loaded into flash." << std::endl;
+        return 0;
+    } catch (const std::exception& ex) {
+        std::cerr << "avr_cli error: " << ex.what() << std::endl;
+        return 1;
+    } catch (...) {
+        std::cerr << "avr_cli error: unknown fatal error" << std::endl;
+        return 1;
+    }
 }

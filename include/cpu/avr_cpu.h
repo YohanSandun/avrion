@@ -28,16 +28,14 @@ public:
   u16 sp() const { return st_.sp; }
   void set_sp(u16 v) { st_.sp = v; }
 
+  void exec_nop(u16 opcode);
+
 private:
   MemoryMap& mem_;
   const DeviceConfig& cfg_;
   CpuState st_;
 
   u32 dispatch_and_exec(u16 opcode);
-
-  // exec functions... (table driven)
-  // static void exec_ldi(void* cpu, u16 opcode);
-  // static void exec_add(void* cpu, u16 opcode);
 };
 
 } // namespace avrion

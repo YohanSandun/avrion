@@ -1,6 +1,10 @@
 #include "cpu/avr_cpu.h"
 #include "device/device_config.h"
 #include "memory/memory_map.h"
+#include "cpu/decoder.h"
+#include <iomanip>
+#include <sstream>
+#include <stdexcept>
 
 namespace avrion
 {
@@ -20,7 +24,8 @@ namespace avrion
 
     u32 AvrCpu::step_instruction()
     {
-        if (st_.halted) {
+        if (st_.halted)
+        {
             return 0;
         }
 
@@ -32,7 +37,17 @@ namespace avrion
 
     u32 AvrCpu::dispatch_and_exec(u16 opcode)
     {
-        return 0;
+        const InstructionDesc *desc = lookup_instruction(opcode);
+        if (!desc || !desc->exec)
+        {
+            std::ostringstream msg;
+            msg << "Unknown or unimplemented opcode: 0x"
+                << std::uppercase << std::hex << std::setw(4) << std::setfill('0') << opcode;
+            throw std::runtime_error(msg.str());
+        }
+
+        (this->*(desc->exec))(opcode);
+        return desc->cycles;
     }
 
 } // namespace avrion

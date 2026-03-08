@@ -197,3 +197,128 @@ TEST_CASE("RJMP - flags unaffected", "[rjmp]")
 
     REQUIRE(cpu.sreg() == sentinel);
 }
+
+// ---------------------------------------------------------------------------
+// BRNE  (1111 01kk kkkk k001)
+//
+// Relative branch: PC = PC + k*2, where k is a signed 7-bit word offset.
+// The exec model advances PC past the opcode before calling exec_brne,
+// so PC on entry is already (instruction_address + 2).
+// The Z-flag guard is handled at a higher level; exec_brne always applies
+// the offset unconditionally.
+// Flags: none affected.
+// ---------------------------------------------------------------------------
+
+// Encode BRNE with a signed 7-bit word offset k.
+static u16 encode_brne(int8_t k)
+{
+    // 1111 01kk kkkk k001  — k occupies bits 9:3
+    return static_cast<u16>(0xF401 | ((static_cast<u16>(k) & 0x7F) << 3));
+}
+
+TEST_CASE("BRNE - forward branch (positive offset)", "[brne]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // PC already past opcode; k=+3 words → +6 bytes
+    cpu.set_pc(20);
+    cpu.exec_brne(encode_brne(3));
+
+    REQUIRE(cpu.pc() == 26u);
+}
+
+TEST_CASE("BRNE - backward branch (negative offset)", "[brne]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // PC=100, k=-5 → target = 100 + (-5)*2 = 90
+    cpu.set_pc(100);
+    cpu.exec_brne(encode_brne(-5));
+
+    REQUIRE(cpu.pc() == 90u);
+}
+
+TEST_CASE("BRNE - zero offset stays at current PC", "[brne]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_pc(50);
+    cpu.exec_brne(encode_brne(0));
+
+    REQUIRE(cpu.pc() == 50u);
+}
+
+TEST_CASE("BRNE - self-loop (k=-1 jumps back to own address)", "[brne]")
+{
+    // Instruction at byte 0; PC is already 2 when exec fires.
+    // k=-1 → target = 2 + (-1)*2 = 0
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_pc(2);
+    cpu.exec_brne(encode_brne(-1));
+
+    REQUIRE(cpu.pc() == 0u);
+}
+
+TEST_CASE("BRNE - max positive offset (k=+63)", "[brne]")
+{
+    // k=63 → offset_bytes = +126
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_pc(100);
+    cpu.exec_brne(encode_brne(63));
+
+    REQUIRE(cpu.pc() == 226u);
+}
+
+TEST_CASE("BRNE - max negative offset (k=-64)", "[brne]")
+{
+    // k=-64 → offset_bytes = -128; start at 228 so target = 100
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_pc(228);
+    cpu.exec_brne(encode_brne(-64));
+
+    REQUIRE(cpu.pc() == 100u);
+}
+
+TEST_CASE("BRNE - real blink.hex encoding (0xF7E1, k=-4 words, target = PC-8)", "[brne]")
+{
+    // At byte 0xD2: opcode 0xF7E1, PC advanced to 0xD4 before exec.
+    // k = (0xF7E1 & 0x03F8) >> 3 = 0x7C; sign-extended = -4 words → -8 bytes.
+    // Target = 0xD4 - 8 = 0xCC.
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_pc(0xD4);
+    cpu.exec_brne(0xF7E1);
+
+    REQUIRE(cpu.pc() == 0xCCu);
+}
+
+TEST_CASE("BRNE - flags unaffected", "[brne]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    constexpr u8 sentinel = 0b11001010;
+    cpu.set_sreg(sentinel);
+    cpu.set_pc(20);
+    cpu.exec_brne(encode_brne(3));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}

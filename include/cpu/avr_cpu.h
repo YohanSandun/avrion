@@ -43,6 +43,7 @@ public:
   // Branching
   void exec_jmp(u16 opcode);
   void exec_rjmp(u16 opcode);
+  void exec_brne(u16 opcode);
 
 private:
   MemoryMap& mem_;

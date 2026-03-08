@@ -21,4 +21,14 @@ void AvrCpu::exec_rjmp(u16 opcode) {
     set_pc(pc() + static_cast<u32>(static_cast<int16_t>(k) << 1));
 }
 
+void AvrCpu::exec_brne(u16 opcode) {
+    // BRNE
+    // 1111 01kk kkkk k001
+    u16 k = (opcode & 0x03F8) >> 3;
+    if (k & 0x0040) {
+        k |= 0xFF80;
+    }
+    set_pc(pc() + static_cast<u32>(static_cast<int16_t>(k) << 1));
+}
+
 } // namespace avrion

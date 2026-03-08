@@ -555,3 +555,440 @@ TEST_CASE("CPI - T and I flags preserved", "[cpi][alu]")
 
     REQUIRE((cpu.sreg() & 0xC0) == 0xC0);
 }
+
+// ---------------------------------------------------------------------------
+// CPC  (0000 01rd dddd rrrr)
+//
+// Operation : Rd - Rr - C  (result discarded, only flags updated)
+// Operands  : Rd, Rr ∈ R0–R31
+// Flags     : C, Z (only CLEARED, never set), N, V, S (N XOR V), H
+// ---------------------------------------------------------------------------
+
+// Encode CPC Rd, Rr opcode from register indices.
+static u16 encode_cpc(u8 d, u8 r)
+{
+    return static_cast<u16>(0x0400
+        | ((d & 0x1F) << 4)
+        | ((r & 0x10) << 5)
+        | (r & 0x0F));
+}
+
+// ---------------------------------------------------------------------------
+// Register preservation — CPC must NOT write back to Rd or Rr
+// ---------------------------------------------------------------------------
+
+TEST_CASE("CPC - Rd and Rr not modified", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(4, 0xAB);
+    cpu.set_reg(5, 0x01);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE(cpu.reg(4) == 0xAB);
+    REQUIRE(cpu.reg(5) == 0x01);
+}
+
+// ---------------------------------------------------------------------------
+// Z flag — only CLEARED on non-zero result; preserved (not set) on zero
+// ---------------------------------------------------------------------------
+
+TEST_CASE("CPC - Z preserved when result is zero and Z was set", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x05 - 0x05 - C(0) = 0 → Z unchanged (was 1, stays 1)
+    cpu.set_sreg(SREG_Z);
+    cpu.set_reg(4, 0x05);
+    cpu.set_reg(5, 0x05);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+}
+
+TEST_CASE("CPC - Z not set when result is zero and Z was clear", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x05 - 0x05 - C(0) = 0 → Z unchanged (was 0, stays 0)
+    cpu.set_sreg(0x00);
+    cpu.set_reg(4, 0x05);
+    cpu.set_reg(5, 0x05);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_Z) == 0);
+}
+
+TEST_CASE("CPC - Z cleared when result is non-zero", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(SREG_Z); // pre-set Z
+    cpu.set_reg(4, 0x10);
+    cpu.set_reg(5, 0x01);
+    cpu.exec_cpc(encode_cpc(4, 5)); // 0x10 - 0x01 - 0 = 0x0F ≠ 0
+
+    REQUIRE((cpu.sreg() & SREG_Z) == 0);
+}
+
+TEST_CASE("CPC - Z cleared when carry-in causes non-zero result", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x06 - 0x05 - C(1) = 0 would equal zero...
+    // but 0x05 - 0x05 - C(1) = 0xFF ≠ 0 → Z cleared
+    cpu.set_sreg(SREG_Z | SREG_C);
+    cpu.set_reg(4, 0x05);
+    cpu.set_reg(5, 0x05);
+    cpu.exec_cpc(encode_cpc(4, 5)); // 0x05 - 0x05 - 1 = 0xFF
+
+    REQUIRE((cpu.sreg() & SREG_Z) == 0);
+}
+
+TEST_CASE("CPC - Z preserved across back-to-back zero results (16-bit use case)", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // Simulate 16-bit compare: low bytes equal (CP sets Z), then high bytes equal (CPC must keep Z set)
+    cpu.set_sreg(SREG_Z); // Z set by preceding CP
+    cpu.set_reg(2, 0xAB);
+    cpu.set_reg(3, 0xAB);
+    cpu.exec_cpc(encode_cpc(2, 3)); // 0xAB - 0xAB - 0 = 0 → Z stays set
+
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+}
+
+// ---------------------------------------------------------------------------
+// C flag (Carry / Borrow)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("CPC - C set when Rd < Rr (borrow, no carry-in)", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(4, 0x05);
+    cpu.set_reg(5, 0x10);
+    cpu.exec_cpc(encode_cpc(4, 5)); // 5 < 16 → borrow
+
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+}
+
+TEST_CASE("CPC - C cleared when Rd > Rr (no borrow, no carry-in)", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // pre-set C
+    cpu.set_reg(4, 0x10);
+    cpu.set_reg(5, 0x05);
+    cpu.exec_cpc(encode_cpc(4, 5)); // 16 > 5 → no borrow
+
+    REQUIRE((cpu.sreg() & SREG_C) == 0);
+}
+
+TEST_CASE("CPC - C set when carry-in causes borrow", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // Rd == Rr but carry-in = 1 → 0x05 - 0x05 - 1 = 0xFF → borrow
+    cpu.set_sreg(SREG_C);
+    cpu.set_reg(4, 0x05);
+    cpu.set_reg(5, 0x05);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+}
+
+TEST_CASE("CPC - C cleared when carry-in covered by Rd > Rr", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x08 - 0x05 - 1 = 0x02 → no borrow
+    cpu.set_sreg(SREG_C);
+    cpu.set_reg(4, 0x08);
+    cpu.set_reg(5, 0x05);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_C) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// N flag (Negative)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("CPC - N set when result bit 7 is set", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x00 - 0x01 - 0 = 0xFF → bit 7 set
+    cpu.set_reg(4, 0x00);
+    cpu.set_reg(5, 0x01);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+}
+
+TEST_CASE("CPC - N cleared when result bit 7 is clear", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // pre-set N
+    // 0x10 - 0x05 - 0 = 0x0B → bit 7 clear
+    cpu.set_reg(4, 0x10);
+    cpu.set_reg(5, 0x05);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_N) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// V flag (Overflow)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("CPC - V set on signed overflow (positive minus negative overflows to negative)", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x7F - 0x80 = 0xFF: d7=0, r7=1, result7=1 → overflow
+    cpu.set_reg(4, 0x7F);
+    cpu.set_reg(5, 0x80);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_V) != 0);
+}
+
+TEST_CASE("CPC - V set on signed overflow (negative minus positive overflows to positive)", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x80 - 0x01 = 0x7F: d7=1, r7=0, result7=0 → overflow
+    cpu.set_reg(4, 0x80);
+    cpu.set_reg(5, 0x01);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_V) != 0);
+}
+
+TEST_CASE("CPC - V cleared when no signed overflow", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // pre-set V
+    // 0x40 - 0x01 = 0x3F: d7=0, r7=0 → no overflow
+    cpu.set_reg(4, 0x40);
+    cpu.set_reg(5, 0x01);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_V) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// S flag (Sign = N XOR V)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("CPC - S clear when N=0 and V=0", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x0F - 0x01 = 0x0E: N=0, V=0 → S=0
+    cpu.set_reg(4, 0x0F);
+    cpu.set_reg(5, 0x01);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_S) == 0);
+}
+
+TEST_CASE("CPC - S set when N=1 and V=0", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x80 - 0x81 = 0xFF: d7=1, r7=1, result7=1 → V=0, N=1 → S=1
+    cpu.set_reg(4, 0x80);
+    cpu.set_reg(5, 0x81);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+    REQUIRE((cpu.sreg() & SREG_V) == 0);
+    REQUIRE((cpu.sreg() & SREG_S) != 0);
+}
+
+TEST_CASE("CPC - S set when N=0 and V=1", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x80 - 0x01 = 0x7F: d7=1, r7=0, result7=0 → V=1, N=0 → S=1
+    cpu.set_reg(4, 0x80);
+    cpu.set_reg(5, 0x01);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_N) == 0);
+    REQUIRE((cpu.sreg() & SREG_V) != 0);
+    REQUIRE((cpu.sreg() & SREG_S) != 0);
+}
+
+TEST_CASE("CPC - S clear when N=1 and V=1", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x7F - 0x80 = 0xFF: d7=0, r7=1, result7=1 → V=1, N=1 → S=0
+    cpu.set_reg(4, 0x7F);
+    cpu.set_reg(5, 0x80);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+    REQUIRE((cpu.sreg() & SREG_V) != 0);
+    REQUIRE((cpu.sreg() & SREG_S) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// H flag (Half Carry / Borrow from bit 3)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("CPC - H set when borrow from bit 3", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x00 - 0x08 - 0: d3=0, r3=1 → borrow at bit 3 → H=1
+    cpu.set_reg(4, 0x00);
+    cpu.set_reg(5, 0x08);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_H) != 0);
+}
+
+TEST_CASE("CPC - H cleared when no borrow from bit 3", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // pre-set H
+    // 0x08 - 0x01 - 0 = 0x07: d3=1, r3=0, result3=1 → no borrow at bit 3 → H=0
+    cpu.set_reg(4, 0x08);
+    cpu.set_reg(5, 0x01);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_H) == 0);
+}
+
+TEST_CASE("CPC - H set when carry-in causes borrow from bit 3", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x08 - 0x08 - C(1) = 0xFF: d3=1, r3=1, result3=1 → H=1 (borrow due to carry-in)
+    cpu.set_sreg(SREG_C);
+    cpu.set_reg(4, 0x08);
+    cpu.set_reg(5, 0x08);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_H) != 0);
+}
+
+// ---------------------------------------------------------------------------
+// T and I flags must not be modified
+// ---------------------------------------------------------------------------
+
+TEST_CASE("CPC - T and I flags preserved", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xC0); // T (bit 6) and I (bit 7) set
+    cpu.set_reg(4, 0x42);
+    cpu.set_reg(5, 0x10);
+    cpu.exec_cpc(encode_cpc(4, 5));
+
+    REQUIRE((cpu.sreg() & 0xC0) == 0xC0);
+}
+
+// ---------------------------------------------------------------------------
+// Register range — CPC operates on R0–R31
+// ---------------------------------------------------------------------------
+
+TEST_CASE("CPC - works with R0 and R1", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(0, 0x10);
+    cpu.set_reg(1, 0x10);
+    cpu.set_sreg(SREG_Z); // Z set going in
+    cpu.exec_cpc(encode_cpc(0, 1)); // 0x10 - 0x10 - 0 = 0 → Z preserved
+
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+    REQUIRE(cpu.reg(0) == 0x10);
+    REQUIRE(cpu.reg(1) == 0x10);
+}
+
+TEST_CASE("CPC - works with R30 and R31", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x05);
+    cpu.set_reg(31, 0x10);
+    cpu.exec_cpc(encode_cpc(30, 31)); // 5 < 16 → borrow → C=1
+
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+    REQUIRE(cpu.reg(30) == 0x05);
+    REQUIRE(cpu.reg(31) == 0x10);
+}
+
+TEST_CASE("CPC - Rd == Rr (same register, no carry-in)", "[cpc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // Comparing a register with itself: result always 0, Z must be preserved if set
+    cpu.set_sreg(SREG_Z);
+    cpu.set_reg(7, 0xBE);
+    cpu.exec_cpc(encode_cpc(7, 7));
+
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+    REQUIRE((cpu.sreg() & SREG_C) == 0);
+}

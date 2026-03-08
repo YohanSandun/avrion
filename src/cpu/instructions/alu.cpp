@@ -46,4 +46,27 @@ void AvrCpu::exec_cpi(u16 opcode) {
     set_sreg(_sreg);
 }
 
+void AvrCpu::exec_cpc(u16 opcode) {
+    // CPC
+    // 0000 01rd dddd rrrr
+    u8 d = reg((opcode >> 4) & 0x1F);
+    u8 r = reg((opcode & 0x000F) | ((opcode >> 5) & 0x10));
+    u8 result = d - r - ((sreg() & 0x01) ? 1 : 0); // C flag is borrow from previous operation
+
+    u8 rd7 = (d >> 7) & 1;
+    u8 rr7 = (r >> 7) & 1;
+    u8 r7 = (result >> 7) & 1;
+
+    u8 _sreg = sreg();
+    _sreg = (_sreg & ~1u) | (((~rd7 & rr7) | (rr7 & r7) | (r7 & ~rd7)) & 1); // C flag
+    _sreg = result == 0
+        ? _sreg : (_sreg & ~0x02u); // Z cleared if result is non-zero; otherwise unchanged
+    _sreg = (result & 0x80) != 0
+        ? (_sreg | 0x04) : (_sreg & ~0x04); // N set if bit 7 of result is set
+    _sreg = (_sreg & ~0x08u) | ((((rd7 & ~rr7 & ~r7) | (~rd7 & rr7 & r7)) & 1) << 3) ; // V flag
+    _sreg |= (((_sreg & 0x04) >> 2) ^ ((_sreg & 0x08) >> 3)) << 4; // S = N XOR V
+    _sreg = (_sreg & ~0x20u) | ((((~(d & 0x8) & (r & 0x8)) | ((r & 0x8) & (result & 0x8)) | ((result & 0x8) & ~(d & 0x8))) & 0x8) << 2); // H flag
+    set_sreg(_sreg);
+}
+
 } // namespace avrion

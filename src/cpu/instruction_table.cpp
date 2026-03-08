@@ -17,6 +17,7 @@ static const std::array<InstructionDesc, 6> kInstructionTable = {{
 
     // branch
     {0xFE0E, 0x940C, "JMP", 3, &AvrCpu::exec_jmp},
+    {0xF000, 0xC000, "RJMP", 2, &AvrCpu::exec_rjmp},
 }};
 
 const InstructionDesc* instruction_table_begin() {

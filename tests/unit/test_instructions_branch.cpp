@@ -90,3 +90,110 @@ TEST_CASE("JMP - word addr in second word only (large address)", "[jmp]")
 
     REQUIRE(cpu.pc() == 0x2000u);
 }
+
+// ---------------------------------------------------------------------------
+// RJMP  (1100 kkkk kkkk kkkk)
+//
+// Relative jump: PC = PC + k*2, where k is a signed 12-bit word offset.
+// PC here is a byte address and is already advanced past the opcode (PC+2)
+// before exec_rjmp is called, consistent with the rest of the instruction
+// exec model in this codebase.
+// Flags: none affected.
+// ---------------------------------------------------------------------------
+
+static u16 encode_rjmp(int16_t k)
+{
+    return static_cast<u16>(0xC000 | (static_cast<u16>(k) & 0x0FFF));
+}
+
+TEST_CASE("RJMP - forward jump (positive offset)", "[rjmp]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // PC already past opcode; k=+5 words → +10 bytes
+    cpu.set_pc(20);
+    cpu.exec_rjmp(encode_rjmp(5));
+
+    REQUIRE(cpu.pc() == 30u);
+}
+
+TEST_CASE("RJMP - zero offset stays at current PC", "[rjmp]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_pc(50);
+    cpu.exec_rjmp(encode_rjmp(0));
+
+    REQUIRE(cpu.pc() == 50u);
+}
+
+TEST_CASE("RJMP - self-loop (k=-1 jumps back to own address)", "[rjmp]")
+{
+    // Instruction at byte 0; PC is already 2 when exec fires.
+    // k=-1 → target = 2 + (-1)*2 = 0
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_pc(2);
+    cpu.exec_rjmp(encode_rjmp(-1));
+
+    REQUIRE(cpu.pc() == 0u);
+}
+
+TEST_CASE("RJMP - backward jump (negative offset)", "[rjmp]")
+{
+    // PC=100, k=-5 → target = 100 + (-5)*2 = 90
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_pc(100);
+    cpu.exec_rjmp(encode_rjmp(-5));
+
+    REQUIRE(cpu.pc() == 90u);
+}
+
+TEST_CASE("RJMP - max positive offset (k=+2047)", "[rjmp]")
+{
+    // k=0x7FF=2047 → offset_bytes = 4094
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_pc(100);
+    cpu.exec_rjmp(encode_rjmp(2047));
+
+    REQUIRE(cpu.pc() == 100u + 4094u);
+}
+
+TEST_CASE("RJMP - max negative offset (k=-2048)", "[rjmp]")
+{
+    // k=-2048 → offset_bytes = -4096; start at 4296 so target = 200
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_pc(4296);
+    cpu.exec_rjmp(encode_rjmp(-2048));
+
+    REQUIRE(cpu.pc() == 200u);
+}
+
+TEST_CASE("RJMP - flags unaffected", "[rjmp]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    constexpr u8 sentinel = 0b10110101;
+    cpu.set_sreg(sentinel);
+    cpu.set_pc(20);
+    cpu.exec_rjmp(encode_rjmp(3));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}

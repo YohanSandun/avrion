@@ -11,4 +11,14 @@ void AvrCpu::exec_jmp(u16 opcode) {
     set_pc(k << 1);
 }
 
+void AvrCpu::exec_rjmp(u16 opcode) {
+    // RJMP
+    // 1100 kkkk kkkk kkkk
+    u16 k = opcode & 0x0FFF;
+    if (k & 0x0800) {
+        k |= 0xF000;
+    }
+    set_pc(pc() + static_cast<u32>(static_cast<int16_t>(k) << 1));
+}
+
 } // namespace avrion

@@ -18,7 +18,7 @@ exit /b 1
 :compile
 echo [compile] Building test targets (config: %CONFIG%)...
 cmake --build "%BUILD_DIR%" --config %CONFIG% ^
-  --target test_intel_hex_decoder test_instructions_alu test_instructions_branch
+  --target test_intel_hex_decoder test_instructions_alu test_instructions_branch test_instructions_data_transfer
 if errorlevel 1 (
     echo [compile] BUILD FAILED
     exit /b 1

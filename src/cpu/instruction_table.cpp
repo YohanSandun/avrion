@@ -9,8 +9,7 @@ static const std::array<InstructionDesc, 6> kInstructionTable = {{
     {0xFFFF, 0x0000, "NOP",  1, &AvrCpu::exec_nop},
 
     // data transfer
-    // {0xF000, 0xE000, "LDI",  1, &AvrCpu::exec_ldi},
-    // {0xFC00, 0x2C00, "MOV",  1, &AvrCpu::exec_mov},
+    {0xF800, 0xB800, "OUT",  1, &AvrCpu::exec_out},
 
     // alu
     {0xFC00, 0x2400, "EOR",  1, &AvrCpu::exec_eor},

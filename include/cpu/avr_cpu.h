@@ -34,6 +34,9 @@ public:
   // ALU
   void exec_eor(u16 opcode);
 
+  // Data transfer
+  void exec_out(u16 opcode);
+
   // Branching
   void exec_jmp(u16 opcode);
 

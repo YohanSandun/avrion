@@ -28,3 +28,12 @@ add_executable(test_instructions_branch
 target_link_libraries(test_instructions_branch PRIVATE avr_core Catch2::Catch2WithMain)
 
 catch_discover_tests(test_instructions_branch)
+
+# ---- Instruction unit tests — Data Transfer --------------------------------
+add_executable(test_instructions_data_transfer
+  test_instructions_data_transfer.cpp
+)
+
+target_link_libraries(test_instructions_data_transfer PRIVATE avr_core Catch2::Catch2WithMain)
+
+catch_discover_tests(test_instructions_data_transfer)

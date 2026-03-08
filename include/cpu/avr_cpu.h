@@ -36,6 +36,7 @@ public:
 
   // Data transfer
   void exec_out(u16 opcode);
+  void exec_ldi(u16 opcode);
 
   // Branching
   void exec_jmp(u16 opcode);

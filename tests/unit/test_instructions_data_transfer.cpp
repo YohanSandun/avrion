@@ -202,3 +202,126 @@ TEST_CASE("OUT - SREG cleared when writing zero", "[out][data_transfer]")
 
     REQUIRE(cpu.sreg() == 0x00);
 }
+
+// ---------------------------------------------------------------------------
+// LDI  (1110 KKKK dddd KKKK)
+//
+// Loads an 8-bit immediate K into Rd, where d ∈ [16..31].
+// Flags: none affected.
+// ---------------------------------------------------------------------------
+
+// Encode LDI Rd, K
+static u16 encode_ldi(u8 d, u8 K)
+{
+    // d must be in [16..31]; offset = d - 16
+    return static_cast<u16>(0xE000
+        | ((K  & 0xF0) << 4)          // K[7:4] → bits [11:8]
+        | (((d - 16) & 0x0F) << 4)    // d offset → bits [7:4]
+        | (K  & 0x0F));               // K[3:0] → bits [3:0]
+}
+
+TEST_CASE("LDI - loads immediate into Rd", "[ldi][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.exec_ldi(encode_ldi(16, 0xAB));
+
+    REQUIRE(cpu.reg(16) == 0xAB);
+}
+
+TEST_CASE("LDI - full byte immediate 0xFF", "[ldi][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.exec_ldi(encode_ldi(20, 0xFF));
+
+    REQUIRE(cpu.reg(20) == 0xFF);
+}
+
+TEST_CASE("LDI - zero immediate clears register", "[ldi][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(24, 0xCD); // pre-fill
+    cpu.exec_ldi(encode_ldi(24, 0x00));
+
+    REQUIRE(cpu.reg(24) == 0x00);
+}
+
+TEST_CASE("LDI - K high nibble decoded correctly", "[ldi][data_transfer]")
+{
+    // K = 0xA0: only high nibble set; low nibble is 0
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.exec_ldi(encode_ldi(18, 0xA0));
+
+    REQUIRE(cpu.reg(18) == 0xA0);
+}
+
+TEST_CASE("LDI - K low nibble decoded correctly", "[ldi][data_transfer]")
+{
+    // K = 0x0B: only low nibble set; high nibble is 0
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.exec_ldi(encode_ldi(18, 0x0B));
+
+    REQUIRE(cpu.reg(18) == 0x0B);
+}
+
+TEST_CASE("LDI - correct destination register selected (R16)", "[ldi][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.exec_ldi(encode_ldi(16, 0x11));
+
+    REQUIRE(cpu.reg(16) == 0x11);
+    REQUIRE(cpu.reg(17) == 0x00); // adjacent unchanged
+}
+
+TEST_CASE("LDI - correct destination register selected (R31)", "[ldi][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.exec_ldi(encode_ldi(31, 0x77));
+
+    REQUIRE(cpu.reg(31) == 0x77);
+    REQUIRE(cpu.reg(30) == 0x00); // adjacent unchanged
+}
+
+TEST_CASE("LDI - correct destination register selected (R24, mid-range)", "[ldi][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.exec_ldi(encode_ldi(24, 0x55));
+
+    REQUIRE(cpu.reg(24) == 0x55);
+}
+
+TEST_CASE("LDI - flags not affected", "[ldi][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    constexpr u8 sentinel = 0b10110101;
+    cpu.set_sreg(sentinel);
+    cpu.exec_ldi(encode_ldi(16, 0xFF));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}

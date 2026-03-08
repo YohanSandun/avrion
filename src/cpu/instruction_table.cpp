@@ -10,6 +10,7 @@ static const std::array<InstructionDesc, 6> kInstructionTable = {{
 
     // data transfer
     {0xF800, 0xB800, "OUT",  1, &AvrCpu::exec_out},
+    {0xF000, 0xE000, "LDI",  1, &AvrCpu::exec_ldi},
 
     // alu
     {0xFC00, 0x2400, "EOR",  1, &AvrCpu::exec_eor},

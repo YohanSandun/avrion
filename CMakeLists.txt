@@ -42,6 +42,7 @@ add_library(avr_core STATIC
   src/cpu/decoder.cpp
   src/cpu/instruction_table.cpp
   src/cpu/instructions/misc.cpp
+  src/cpu/instructions/branch.cpp
   src/device/device.cpp
   src/device/atmega328p.cpp
   src/memory/memory_map.cpp

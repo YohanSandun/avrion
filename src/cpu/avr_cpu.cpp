@@ -30,7 +30,6 @@ namespace avrion
         }
 
         u16 opcode = mem_.fetch16(st_.pc);
-        st_.pc += 2;
 
         return dispatch_and_exec(opcode);
     }

@@ -22,13 +22,17 @@ public:
   u8  sreg() const { return st_.sreg; }
   void set_sreg(u8 v) { st_.sreg = v; }
 
-  u16 pc() const { return st_.pc; }
-  void set_pc(u16 v) { st_.pc = v; }
+  u32 pc() const { return st_.pc; }
+  void set_pc(u32 v) { st_.pc = v; }
 
   u16 sp() const { return st_.sp; }
   void set_sp(u16 v) { st_.sp = v; }
 
+  // Misc
   void exec_nop(u16 opcode);
+
+  // Branching
+  void exec_jmp(u16 opcode);
 
 private:
   MemoryMap& mem_;

@@ -6,7 +6,7 @@ namespace avrion {
 
 struct CpuState {
   std::array<u8, 32> r{};
-  u16 pc = 0;
+  u32 pc = 0;
   u8  sreg = 0;
   u16 sp = 0;
 
@@ -15,7 +15,7 @@ struct CpuState {
 
 struct CpuSnapshot {
   std::array<u8, 32> r{};
-  u16 pc = 0;
+  u32 pc = 0;
   u8  sreg = 0;
   u16 sp = 0;
 };

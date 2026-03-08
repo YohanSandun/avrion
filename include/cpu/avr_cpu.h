@@ -31,6 +31,9 @@ public:
   // Misc
   void exec_nop(u16 opcode);
 
+  // ALU
+  void exec_eor(u16 opcode);
+
   // Branching
   void exec_jmp(u16 opcode);
 

@@ -13,8 +13,7 @@ static const std::array<InstructionDesc, 6> kInstructionTable = {{
     // {0xFC00, 0x2C00, "MOV",  1, &AvrCpu::exec_mov},
 
     // alu
-    // {0xFC00, 0x0C00, "ADD",  1, &AvrCpu::exec_add},
-    // {0xFC00, 0x1800, "SUB",  1, &AvrCpu::exec_sub},
+    {0xFC00, 0x2400, "EOR",  1, &AvrCpu::exec_eor},
 
     // branch
     {0xFE0E, 0x940C, "JMP", 3, &AvrCpu::exec_jmp},

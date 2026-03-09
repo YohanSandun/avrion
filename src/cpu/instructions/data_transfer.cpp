@@ -11,6 +11,14 @@ void AvrCpu::exec_out(u16 opcode) {
     mem_.write8(cfg_.io_base + A, reg(r));
 }
 
+void AvrCpu::exec_in(u16 opcode) {
+    // IN
+    // 1011 0AAr rrrr AAAA
+    u8 A = (opcode & 0x0F) | ((opcode & 0x0600) >> 5);
+    u8 r = (opcode >> 4) & 0x1F;
+    set_reg(r, mem_.read8(cfg_.io_base + A));
+}
+
 void AvrCpu::exec_ldi(u16 opcode) {
     // LDI
     // 1110 KKKK dddd KKKK

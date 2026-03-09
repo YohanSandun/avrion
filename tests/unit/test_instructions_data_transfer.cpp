@@ -803,3 +803,227 @@ TEST_CASE("ST -X - flags not affected", "[st_x_pre_dec][data_transfer]")
 
     REQUIRE(cpu.sreg() == sentinel);
 }
+
+// ---------------------------------------------------------------------------
+// IN  (1011 0AAr rrrr AAAA)
+//
+// Reads from I/O address A into Rd.
+// I/O address mapping: data_addr = io_base + A.
+// Flags: none affected.
+// ---------------------------------------------------------------------------
+
+// IN  1011 0AAr rrrr AAAA
+//   A[5:4] → bits [10:9]
+//   r[4:0] → bits [8:4]
+//   A[3:0] → bits [3:0]
+static u16 encode_in(u8 A, u8 r)
+{
+    return static_cast<u16>(0xB000
+        | ((A & 0x30) << 5)   // A[5:4] → bits [10:9]
+        | ((r & 0x1F) << 4)   // r[4:0] → bits [8:4]
+        | (A & 0x0F));        // A[3:0] → bits [3:0]
+}
+
+// ---------------------------------------------------------------------------
+// IN — result / register tests
+// ---------------------------------------------------------------------------
+
+TEST_CASE("IN - value at IO address is loaded into Rd", "[in][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(cfg.io_base + 0x01, 0xAB);
+    cpu.exec_in(encode_in(0x01, 5)); // IN R5, 0x01
+
+    REQUIRE(cpu.reg(5) == 0xAB);
+}
+
+TEST_CASE("IN - IO address is not modified after read", "[in][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(cfg.io_base + 0x02, 0x55);
+    cpu.exec_in(encode_in(0x02, 7));
+
+    REQUIRE(mem.read8(cfg.io_base + 0x02) == 0x55);
+}
+
+TEST_CASE("IN - zero value at IO address loads zero into Rd", "[in][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(3, 0xFF); // pre-fill to confirm zero is actually written
+    // io_base+0x03 is zero-initialised
+    cpu.exec_in(encode_in(0x03, 3));
+
+    REQUIRE(cpu.reg(3) == 0x00);
+}
+
+TEST_CASE("IN - 0xFF value is loaded correctly", "[in][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(cfg.io_base + 0x04, 0xFF);
+    cpu.exec_in(encode_in(0x04, 10));
+
+    REQUIRE(cpu.reg(10) == 0xFF);
+}
+
+// ---------------------------------------------------------------------------
+// IN — destination register selection
+// ---------------------------------------------------------------------------
+
+TEST_CASE("IN - correct destination register selected (R0)", "[in][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(cfg.io_base + 0x00, 0x11);
+    cpu.set_reg(1, 0x22); // decoy
+    cpu.exec_in(encode_in(0x00, 0));
+
+    REQUIRE(cpu.reg(0) == 0x11);
+    REQUIRE(cpu.reg(1) == 0x22); // decoy unchanged
+}
+
+TEST_CASE("IN - correct destination register selected (R31)", "[in][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(cfg.io_base + 0x00, 0xCC);
+    cpu.set_reg(30, 0xFF); // decoy
+    cpu.exec_in(encode_in(0x00, 31));
+
+    REQUIRE(cpu.reg(31) == 0xCC);
+    REQUIRE(cpu.reg(30) == 0xFF); // decoy unchanged
+}
+
+TEST_CASE("IN - correct destination register selected (R16, upper half)", "[in][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(cfg.io_base + 0x05, 0x9D);
+    cpu.exec_in(encode_in(0x05, 16));
+
+    REQUIRE(cpu.reg(16) == 0x9D);
+}
+
+// ---------------------------------------------------------------------------
+// IN — I/O address decoding
+// ---------------------------------------------------------------------------
+
+TEST_CASE("IN - address field A decoded correctly (low nibble only)", "[in][data_transfer]")
+{
+    // A = 0x0A: only bits [3:0] used, bits [5:4] are 0
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(cfg.io_base + 0x0A, 0xBB);
+    cpu.exec_in(encode_in(0x0A, 2));
+
+    REQUIRE(cpu.reg(2) == 0xBB);
+}
+
+TEST_CASE("IN - address field A decoded correctly (bits [5:4] set)", "[in][data_transfer]")
+{
+    // A = 0x3F: maximum 6-bit address (all bits set)
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(cfg.io_base + 0x3F, 0x42);
+    cpu.exec_in(encode_in(0x3F, 3));
+
+    REQUIRE(cpu.reg(3) == 0x42);
+}
+
+TEST_CASE("IN - only the target register is written, adjacent registers unchanged", "[in][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(cfg.io_base + 0x01, 0xDE);
+    cpu.set_reg(8,  0x00);
+    cpu.set_reg(9,  0x77); // decoy above
+    cpu.set_reg(7,  0x88); // decoy below
+    cpu.exec_in(encode_in(0x01, 8));
+
+    REQUIRE(cpu.reg(8) == 0xDE);
+    REQUIRE(cpu.reg(9) == 0x77);
+    REQUIRE(cpu.reg(7) == 0x88);
+}
+
+// ---------------------------------------------------------------------------
+// IN — SREG special-register test
+// ---------------------------------------------------------------------------
+
+TEST_CASE("IN - reading from SREG IO address loads cpu sreg value into Rd", "[in][data_transfer]")
+{
+    // AVR convention: SREG I/O address = 0x3F  →  data addr = 0x5F
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_sreg(0xA5);
+    cpu.exec_in(encode_in(0x3F, 10)); // IN R10, SREG
+
+    REQUIRE(cpu.reg(10) == 0xA5);
+}
+
+TEST_CASE("IN - SREG read reflects exact bit pattern", "[in][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_sreg(0b10110101);
+    cpu.exec_in(encode_in(0x3F, 20));
+
+    REQUIRE(cpu.reg(20) == 0b10110101);
+}
+
+// ---------------------------------------------------------------------------
+// IN — flags not affected
+// ---------------------------------------------------------------------------
+
+TEST_CASE("IN - flags not affected", "[in][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    constexpr u8 sentinel = 0b11001010;
+    cpu.set_sreg(sentinel);
+    mem.write8(cfg.io_base + 0x01, 0xFF);
+    cpu.exec_in(encode_in(0x01, 4));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}

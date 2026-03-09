@@ -42,6 +42,7 @@ public:
 
   // Data transfer
   void exec_out(u16 opcode);
+  void exec_in(u16 opcode);
   void exec_ldi(u16 opcode);
   void exec_st_x(u16 opcode);
   void exec_st_x_post_inc(u16 opcode);

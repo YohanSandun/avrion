@@ -33,6 +33,7 @@ public:
 
   // Misc
   void exec_nop(u16 opcode);
+  void exec_sei(u16 opcode);
 
   // ALU
   void exec_eor(u16 opcode);

@@ -322,3 +322,74 @@ TEST_CASE("BRNE - flags unaffected", "[brne]")
 
     REQUIRE(cpu.sreg() == sentinel);
 }
+
+// ---------------------------------------------------------------------------
+// BRNE — Z-flag guard tests
+//
+// BRNE branches only when Z==0.  When Z==1 (equal), PC must not change.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("BRNE - Z=0: branch is taken", "[brne]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0x00); // Z=0 — branch taken
+    cpu.set_pc(20);
+    cpu.exec_brne(encode_brne(3)); // +6 bytes
+
+    REQUIRE(cpu.pc() == 26u);
+}
+
+TEST_CASE("BRNE - Z=1: branch is not taken, PC unchanged", "[brne]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0x02); // Z=1 (bit 1) — branch not taken
+    cpu.set_pc(20);
+    cpu.exec_brne(encode_brne(3));
+
+    REQUIRE(cpu.pc() == 20u);
+}
+
+TEST_CASE("BRNE - Z=1: negative offset also not taken", "[brne]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0x02); // Z=1
+    cpu.set_pc(100);
+    cpu.exec_brne(encode_brne(-5));
+
+    REQUIRE(cpu.pc() == 100u);
+}
+
+TEST_CASE("BRNE - Z=1 with other SREG bits set: branch still not taken", "[brne]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // all flags set, including Z
+    cpu.set_pc(50);
+    cpu.exec_brne(encode_brne(10));
+
+    REQUIRE(cpu.pc() == 50u);
+}
+
+TEST_CASE("BRNE - only Z bit matters: other flags set but Z=0 still branches", "[brne]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFD); // all flags set except Z (bit 1 = 0)
+    cpu.set_pc(20);
+    cpu.exec_brne(encode_brne(3)); // +6 bytes
+
+    REQUIRE(cpu.pc() == 26u);
+}

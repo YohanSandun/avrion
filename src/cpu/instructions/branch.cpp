@@ -24,6 +24,10 @@ void AvrCpu::exec_rjmp(u16 opcode) {
 void AvrCpu::exec_brne(u16 opcode) {
     // BRNE
     // 1111 01kk kkkk k001
+    if (sreg() & 0x02) { // Z flag set → not taken
+        return;
+    }
+    
     u16 k = (opcode & 0x03F8) >> 3;
     if (k & 0x0040) {
         k |= 0xFF80;

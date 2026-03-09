@@ -62,4 +62,14 @@ void AvrCpu::exec_lds(u16 opcode) {
     set_pc(pc() + 2);
 }
 
+void AvrCpu::exec_sts(u16 opcode) {
+    // STS
+    // 1001 001d dddd 0000
+    // kkkk kkkk kkkk kkkk
+    u8 d = (opcode & 0x01F0) >> 4;
+    u16 k = mem_.fetch16(pc());
+    mem_.write8(k, reg(d));
+    set_pc(pc() + 2);
+}
+
 } // namespace avrion

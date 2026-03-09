@@ -1291,3 +1291,245 @@ TEST_CASE("LDS - flags not affected", "[lds][data_transfer]")
 
     REQUIRE(cpu.sreg() == sentinel);
 }
+
+// ---------------------------------------------------------------------------
+// STS  (1001 001d dddd 0000 | kkkk kkkk kkkk kkkk)
+//
+// Two-word instruction. The second word in flash (at pc()) holds the 16-bit
+// data address k. Writes reg(d) to mem[k] and advances PC by 2.
+// Flags: none affected.
+// ---------------------------------------------------------------------------
+
+// STS  1001 001d dddd 0000
+//   d[4:0] → bits [8:4]
+static u16 encode_sts(u8 d)
+{
+    return static_cast<u16>(0x9200 | ((d & 0x1F) << 4));
+}
+
+// Reuses lds_flash_write16 and make_lds_config helpers from the LDS section.
+
+// ---------------------------------------------------------------------------
+// STS — value / result tests
+// ---------------------------------------------------------------------------
+
+TEST_CASE("STS - value from Rd is written to the data address", "[sts][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(5, 0xAB);
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0110);
+    cpu.exec_sts(encode_sts(5));
+
+    REQUIRE(mem.read8(0x0110) == 0xAB);
+}
+
+TEST_CASE("STS - zero value is written correctly", "[sts][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(0x0100, 0xFF); // pre-fill to confirm zero overwrites
+    cpu.set_reg(3, 0x00);
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0100);
+    cpu.exec_sts(encode_sts(3));
+
+    REQUIRE(mem.read8(0x0100) == 0x00);
+}
+
+TEST_CASE("STS - 0xFF value is written correctly", "[sts][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(10, 0xFF);
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0105);
+    cpu.exec_sts(encode_sts(10));
+
+    REQUIRE(mem.read8(0x0105) == 0xFF);
+}
+
+TEST_CASE("STS - source register is not modified", "[sts][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(7, 0x42);
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0108);
+    cpu.exec_sts(encode_sts(7));
+
+    REQUIRE(cpu.reg(7) == 0x42);
+}
+
+// ---------------------------------------------------------------------------
+// STS — source register selection
+// ---------------------------------------------------------------------------
+
+TEST_CASE("STS - correct source register selected (R0)", "[sts][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(0, 0x11);
+    cpu.set_reg(1, 0x22); // decoy
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0100);
+    cpu.exec_sts(encode_sts(0));
+
+    REQUIRE(mem.read8(0x0100) == 0x11);
+}
+
+TEST_CASE("STS - correct source register selected (R31)", "[sts][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(31, 0xCC);
+    cpu.set_reg(30, 0xFF); // decoy
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0100);
+    cpu.exec_sts(encode_sts(31));
+
+    REQUIRE(mem.read8(0x0100) == 0xCC);
+}
+
+TEST_CASE("STS - correct source register selected (R16, upper half)", "[sts][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(16, 0x9D);
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0112);
+    cpu.exec_sts(encode_sts(16));
+
+    REQUIRE(mem.read8(0x0112) == 0x9D);
+}
+
+// ---------------------------------------------------------------------------
+// STS — address word read from the correct flash position (pc())
+// ---------------------------------------------------------------------------
+
+TEST_CASE("STS - address word is read from flash at pc()", "[sts][data_transfer]")
+{
+    // PC = 4: address word must come from byte offset 4, not 2.
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(5, 0xBB);
+    cpu.set_pc(4);
+    lds_flash_write16(mem.flash(), 4, 0x0110); // correct slot
+    lds_flash_write16(mem.flash(), 2, 0x0120); // wrong slot — must not be used
+    cpu.exec_sts(encode_sts(5));
+
+    REQUIRE(mem.read8(0x0110) == 0xBB);
+    REQUIRE(mem.read8(0x0120) == 0x00); // wrong slot untouched
+}
+
+TEST_CASE("STS - address low byte decoded correctly", "[sts][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(4, 0x77);
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0115);
+    cpu.exec_sts(encode_sts(4));
+
+    REQUIRE(mem.read8(0x0115) == 0x77);
+}
+
+TEST_CASE("STS - address high byte decoded correctly", "[sts][data_transfer]")
+{
+    // k = 0x0100: if the high byte were ignored the write would target 0x0000 (not SRAM).
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(6, 0xD3);
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0100);
+    cpu.exec_sts(encode_sts(6));
+
+    REQUIRE(mem.read8(0x0100) == 0xD3);
+}
+
+TEST_CASE("STS - only the target address is written, adjacent memory unchanged", "[sts][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(8, 0xDE);
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0108);
+    cpu.exec_sts(encode_sts(8));
+
+    REQUIRE(mem.read8(0x0108) == 0xDE);
+    REQUIRE(mem.read8(0x0107) == 0x00);
+    REQUIRE(mem.read8(0x0109) == 0x00);
+}
+
+// ---------------------------------------------------------------------------
+// STS — PC advanced past the address word
+// ---------------------------------------------------------------------------
+
+TEST_CASE("STS - PC is advanced by 2 after reading the address word", "[sts][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0100);
+    cpu.exec_sts(encode_sts(5));
+
+    REQUIRE(cpu.pc() == 4u);
+}
+
+// ---------------------------------------------------------------------------
+// STS — flags not affected
+// ---------------------------------------------------------------------------
+
+TEST_CASE("STS - flags not affected", "[sts][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    constexpr u8 sentinel = 0b10110101;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(4, 0xFF);
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0100);
+    cpu.exec_sts(encode_sts(4));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}

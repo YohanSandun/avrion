@@ -3,15 +3,16 @@
 
 namespace avrion {
 
-void AvrCpu::exec_jmp(u16 opcode) {
+u8 AvrCpu::exec_jmp(u16 opcode) {
     // JMP
     // 1001 010k kkkk 110k
     // kkkk kkkk kkkk kkkk
     u32 k = ((opcode & 0x01F0) << 13) | ((opcode & 0x0001) << 16) | mem_.fetch16(pc());
     set_pc(k << 1);
+    return cfg_.has_22_bit_pc ? 4 : 3;
 }
 
-void AvrCpu::exec_rjmp(u16 opcode) {
+u8 AvrCpu::exec_rjmp(u16 opcode) {
     // RJMP
     // 1100 kkkk kkkk kkkk
     u16 k = opcode & 0x0FFF;
@@ -19,13 +20,14 @@ void AvrCpu::exec_rjmp(u16 opcode) {
         k |= 0xF000;
     }
     set_pc(pc() + static_cast<u32>(static_cast<int16_t>(k) << 1));
+    return 2;
 }
 
-void AvrCpu::exec_brne(u16 opcode) {
+u8 AvrCpu::exec_brne(u16 opcode) {
     // BRNE
     // 1111 01kk kkkk k001
     if (sreg() & 0x02) { // Z flag set → not taken
-        return;
+        return 1;
     }
     
     u16 k = (opcode & 0x03F8) >> 3;
@@ -33,9 +35,10 @@ void AvrCpu::exec_brne(u16 opcode) {
         k |= 0xFF80;
     }
     set_pc(pc() + static_cast<u32>(static_cast<int16_t>(k) << 1));
+    return 2;
 }
 
-void AvrCpu::exec_call(u16 opcode) {
+u8 AvrCpu::exec_call(u16 opcode) {
     // CALL
     // 1001 010k kkkk 111k
     // kkkk kkkk kkkk kkkk
@@ -47,6 +50,22 @@ void AvrCpu::exec_call(u16 opcode) {
         mem_.write8(--st_.sp, (ret >> 16) & 0xFF);
     }
     set_pc(k << 1);
+    return cfg_.has_22_bit_pc ? 4 : 3;
+}
+
+u8 AvrCpu::exec_breq(u16 opcode) {
+    // BREQ
+    // 1111 00kk kkkk k001
+    if (!(sreg() & 0x02)) { // Z flag not set → not taken
+        return 1;
+    }
+    
+    u16 k = (opcode & 0x03F8) >> 3;
+    if (k & 0x0040) {
+        k |= 0xFF80;
+    }
+    set_pc(pc() + static_cast<u32>(static_cast<int16_t>(k) << 1));
+    return 2;
 }
 
 } // namespace avrion

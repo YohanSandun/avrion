@@ -35,34 +35,35 @@ public:
   void set_z(u16 v);
 
   // Misc
-  void exec_nop(u16 opcode);
-  void exec_sei(u16 opcode);
+  u8 exec_nop(u16 opcode);
+  u8 exec_sei(u16 opcode);
 
   // ALU
-  void exec_eor(u16 opcode);
-  void exec_cpi(u16 opcode);
-  void exec_cpc(u16 opcode);
-  void exec_ori(u16 opcode);
-  void exec_and(u16 opcode);
+  u8 exec_eor(u16 opcode);
+  u8 exec_cpi(u16 opcode);
+  u8 exec_cpc(u16 opcode);
+  u8 exec_ori(u16 opcode);
+  u8 exec_and(u16 opcode);
 
   // Data transfer
-  void exec_out(u16 opcode);
-  void exec_in(u16 opcode);
-  void exec_ldi(u16 opcode);
-  void exec_st_x(u16 opcode);
-  void exec_st_x_post_inc(u16 opcode);
-  void exec_st_x_pre_dec(u16 opcode);
-  void exec_lds(u16 opcode);
-  void exec_sts(u16 opcode);
-  void exec_lpm(u16 opcode);
-  void exec_lpm_z(u16 opcode);
-  void exec_lpm_z_post_inc(u16 opcode);
+  u8 exec_out(u16 opcode);
+  u8 exec_in(u16 opcode);
+  u8 exec_ldi(u16 opcode);
+  u8 exec_st_x(u16 opcode);
+  u8 exec_st_x_post_inc(u16 opcode);
+  u8 exec_st_x_pre_dec(u16 opcode);
+  u8 exec_lds(u16 opcode);
+  u8 exec_sts(u16 opcode);
+  u8 exec_lpm(u16 opcode);
+  u8 exec_lpm_z(u16 opcode);
+  u8 exec_lpm_z_post_inc(u16 opcode);
 
   // Branching
-  void exec_jmp(u16 opcode);
-  void exec_rjmp(u16 opcode);
-  void exec_brne(u16 opcode);
-  void exec_call(u16 opcode);
+  u8 exec_jmp(u16 opcode);
+  u8 exec_rjmp(u16 opcode);
+  u8 exec_brne(u16 opcode);
+  u8 exec_call(u16 opcode);
+  u8 exec_breq(u16 opcode);
 
 private:
   MemoryMap& mem_;

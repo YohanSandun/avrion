@@ -3,7 +3,7 @@
 
 namespace avrion {
 
-void AvrCpu::exec_eor(u16 opcode) {
+u8 AvrCpu::exec_eor(u16 opcode) {
     // EOR
     // 0010 01rd dddd rrrr
     u8 d = (opcode >> 4) & 0x1F;
@@ -21,9 +21,10 @@ void AvrCpu::exec_eor(u16 opcode) {
     _sreg = (_sreg & 0x04)
         ? (_sreg | 0x10) : (_sreg & ~0x10);
     set_sreg(_sreg);
+    return 1;
 }
 
-void AvrCpu::exec_cpi(u16 opcode) {
+u8 AvrCpu::exec_cpi(u16 opcode) {
     // CPI
     // 0011 KKKK dddd KKKK
     u8 d = reg(16 + ((opcode >> 4) & 0x0F));
@@ -44,9 +45,10 @@ void AvrCpu::exec_cpi(u16 opcode) {
     _sreg |= (((_sreg & 0x04) >> 2) ^ ((_sreg & 0x08) >> 3)) << 4; // S = N XOR V
     _sreg = (_sreg & ~0x20u) | ((((~(d & 0x8) & (k & 0x8)) | ((k & 0x8) & (result & 0x8)) | ((result & 0x8) & ~(d & 0x8))) & 0x8) << 2); // H flag
     set_sreg(_sreg);
+    return 1;
 }
 
-void AvrCpu::exec_cpc(u16 opcode) {
+u8 AvrCpu::exec_cpc(u16 opcode) {
     // CPC
     // 0000 01rd dddd rrrr
     u8 d = reg((opcode >> 4) & 0x1F);
@@ -67,9 +69,10 @@ void AvrCpu::exec_cpc(u16 opcode) {
     _sreg |= (((_sreg & 0x04) >> 2) ^ ((_sreg & 0x08) >> 3)) << 4; // S = N XOR V
     _sreg = (_sreg & ~0x20u) | ((((~(d & 0x8) & (r & 0x8)) | ((r & 0x8) & (result & 0x8)) | ((result & 0x8) & ~(d & 0x8))) & 0x8) << 2); // H flag
     set_sreg(_sreg);
+    return 1;
 }
 
-void AvrCpu::exec_ori(u16 opcode) {
+u8 AvrCpu::exec_ori(u16 opcode) {
     // ORI
     // 0110 KKKK dddd KKKK
     u8 d = 16 + ((opcode >> 4) & 0x0F);
@@ -87,9 +90,10 @@ void AvrCpu::exec_ori(u16 opcode) {
     _sreg = (_sreg & 0x04)
         ? (_sreg | 0x10) : (_sreg & ~0x10);
     set_sreg(_sreg);
+    return 1;
 }
 
-void AvrCpu::exec_and(u16 opcode) {
+u8 AvrCpu::exec_and(u16 opcode) {
     // AND
     // 0010 00rd dddd rrrr
     u8 d = (opcode >> 4) & 0x1F;
@@ -107,6 +111,7 @@ void AvrCpu::exec_and(u16 opcode) {
     _sreg = (_sreg & 0x04)
         ? (_sreg | 0x10) : (_sreg & ~0x10);
     set_sreg(_sreg);
+    return 1;
 }
 
 } // namespace avrion

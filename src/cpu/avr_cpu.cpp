@@ -46,9 +46,7 @@ namespace avrion
             throw std::runtime_error(msg.str());
         }
 
-        (this->*(desc->exec))(opcode);
-        const u8 cycles = cfg_.has_22_bit_pc ? desc->cycles_22bit_pc : desc->cycles;
-        return cycles;
+        return (this->*(desc->exec))(opcode);
     }
 
     u16 AvrCpu::x() const

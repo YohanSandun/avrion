@@ -31,6 +31,9 @@ public:
   u16 x() const;
   void set_x(u16 v);
 
+  u16 z() const;
+  void set_z(u16 v);
+
   // Misc
   void exec_nop(u16 opcode);
   void exec_sei(u16 opcode);
@@ -50,6 +53,9 @@ public:
   void exec_st_x_pre_dec(u16 opcode);
   void exec_lds(u16 opcode);
   void exec_sts(u16 opcode);
+  void exec_lpm(u16 opcode);
+  void exec_lpm_z(u16 opcode);
+  void exec_lpm_z_post_inc(u16 opcode);
 
   // Branching
   void exec_jmp(u16 opcode);

@@ -41,6 +41,10 @@ namespace avrion
             c.x_low_reg = 26;  
             c.x_high_reg = 27;
 
+            // ZL = R30, ZH = R31
+            c.z_low_reg = 30;
+            c.z_high_reg = 31;
+
             c.reset_vector_flash_addr = 0x0000;
 
             // GPIO port regions — data-space addresses (IO offset + 0x20)

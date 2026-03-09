@@ -1533,3 +1533,373 @@ TEST_CASE("STS - flags not affected", "[sts][data_transfer]")
 
     REQUIRE(cpu.sreg() == sentinel);
 }
+
+// ---------------------------------------------------------------------------
+// LPM / LPM Z / LPM Z+ — shared infrastructure
+//
+// AVR docs:
+//   LPM        : R0  ← flash[Z]  (Z unchanged)        opcode 0x95C8 (fixed)
+//   LPM Z      : Rd  ← flash[Z]  (Z unchanged)        1001 000d dddd 0100
+//   LPM Z+     : Rd  ← flash[Z], Z ← Z+1              1001 000d dddd 0101
+//
+// Z is the 16-bit pointer formed by ZH:ZL = R31:R30.
+// The byte address in flash is the Z value directly.
+// Flags: none affected by any LPM variant.
+// ---------------------------------------------------------------------------
+
+static DeviceConfig make_lpm_config()
+{
+    DeviceConfig c{};
+    c.flash_size_bytes = 32 * 1024;
+    c.sram_size_bytes  = 2  * 1024;
+    c.sram_base        = 0x0100;
+    c.z_low_reg        = 30;   // ZL = R30
+    c.z_high_reg       = 31;   // ZH = R31
+    return c;
+}
+
+// Write a byte into flash at a given byte address.
+static void flash_write8(std::vector<u8>& flash, u32 byte_addr, u8 value)
+{
+    flash[byte_addr] = value;
+}
+
+// Encode LPM Z  (1001 000d dddd 0100)
+static u16 encode_lpm_z(u8 d)
+{
+    return static_cast<u16>(0x9004 | ((d & 0x1F) << 4));
+}
+
+// Encode LPM Z+  (1001 000d dddd 0101)
+static u16 encode_lpm_z_post_inc(u8 d)
+{
+    return static_cast<u16>(0x9005 | ((d & 0x1F) << 4));
+}
+
+// ---------------------------------------------------------------------------
+// LPM  (1001 0101 1100 1000)
+//
+// Always loads into R0. Z is not modified.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("LPM - byte at flash[Z] is loaded into R0", "[lpm][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    flash_write8(mem.flash(), 0x0040, 0xAB);
+    cpu.set_z(0x0040);
+    cpu.exec_lpm(0x95C8);
+
+    REQUIRE(cpu.reg(0) == 0xAB);
+}
+
+TEST_CASE("LPM - zero byte at flash[Z] loads zero into R0", "[lpm][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(0, 0xFF); // pre-fill
+    flash_write8(mem.flash(), 0x0010, 0x00);
+    cpu.set_z(0x0010);
+    cpu.exec_lpm(0x95C8);
+
+    REQUIRE(cpu.reg(0) == 0x00);
+}
+
+TEST_CASE("LPM - 0xFF byte at flash[Z] is loaded correctly", "[lpm][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    flash_write8(mem.flash(), 0x0020, 0xFF);
+    cpu.set_z(0x0020);
+    cpu.exec_lpm(0x95C8);
+
+    REQUIRE(cpu.reg(0) == 0xFF);
+}
+
+TEST_CASE("LPM - correct flash byte address used (Z low byte)", "[lpm][data_transfer]")
+{
+    // Two adjacent bytes — Z selects the correct one via its low byte.
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    flash_write8(mem.flash(), 0x0030, 0x11);
+    flash_write8(mem.flash(), 0x0031, 0x22);
+    cpu.set_z(0x0031);
+    cpu.exec_lpm(0x95C8);
+
+    REQUIRE(cpu.reg(0) == 0x22);
+}
+
+TEST_CASE("LPM - Z is not modified", "[lpm][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_z(0x0050);
+    cpu.exec_lpm(0x95C8);
+
+    REQUIRE(cpu.z() == 0x0050);
+}
+
+TEST_CASE("LPM - destination is always R0, adjacent registers unchanged", "[lpm][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(1, 0x77); // decoy
+    flash_write8(mem.flash(), 0x0010, 0xAA);
+    cpu.set_z(0x0010);
+    cpu.exec_lpm(0x95C8);
+
+    REQUIRE(cpu.reg(0) == 0xAA);
+    REQUIRE(cpu.reg(1) == 0x77); // unchanged
+}
+
+TEST_CASE("LPM - flags not affected", "[lpm][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    constexpr u8 sentinel = 0b10110101;
+    cpu.set_sreg(sentinel);
+    flash_write8(mem.flash(), 0x0010, 0xFF);
+    cpu.set_z(0x0010);
+    cpu.exec_lpm(0x95C8);
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+// ---------------------------------------------------------------------------
+// LPM Z  (1001 000d dddd 0100)
+//
+// Loads flash[Z] into Rd. Z is not modified.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("LPM Z - byte at flash[Z] is loaded into Rd", "[lpm_z][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    flash_write8(mem.flash(), 0x0040, 0xAB);
+    cpu.set_z(0x0040);
+    cpu.exec_lpm_z(encode_lpm_z(5));
+
+    REQUIRE(cpu.reg(5) == 0xAB);
+}
+
+TEST_CASE("LPM Z - zero byte at flash[Z] loads zero into Rd", "[lpm_z][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(3, 0xFF); // pre-fill
+    cpu.set_z(0x0010);
+    cpu.exec_lpm_z(encode_lpm_z(3));
+
+    REQUIRE(cpu.reg(3) == 0x00);
+}
+
+TEST_CASE("LPM Z - correct destination register selected (R0)", "[lpm_z][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    flash_write8(mem.flash(), 0x0010, 0x11);
+    cpu.set_reg(1, 0x22); // decoy
+    cpu.set_z(0x0010);
+    cpu.exec_lpm_z(encode_lpm_z(0));
+
+    REQUIRE(cpu.reg(0) == 0x11);
+    REQUIRE(cpu.reg(1) == 0x22);
+}
+
+TEST_CASE("LPM Z - correct destination register selected (R29)", "[lpm_z][data_transfer]")
+{
+    // R29 is adjacent to ZH (R31) and ZL (R30) — good boundary check.
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    flash_write8(mem.flash(), 0x0010, 0xCC);
+    cpu.set_reg(28, 0xFF); // decoy
+    cpu.set_z(0x0010);
+    cpu.exec_lpm_z(encode_lpm_z(29));
+
+    REQUIRE(cpu.reg(29) == 0xCC);
+    REQUIRE(cpu.reg(28) == 0xFF);
+}
+
+TEST_CASE("LPM Z - correct flash address used (Z selects the byte)", "[lpm_z][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    flash_write8(mem.flash(), 0x0060, 0x55);
+    flash_write8(mem.flash(), 0x0061, 0x66);
+    cpu.set_z(0x0061);
+    cpu.exec_lpm_z(encode_lpm_z(7));
+
+    REQUIRE(cpu.reg(7) == 0x66);
+}
+
+TEST_CASE("LPM Z - Z is not modified", "[lpm_z][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_z(0x0050);
+    cpu.exec_lpm_z(encode_lpm_z(5));
+
+    REQUIRE(cpu.z() == 0x0050);
+}
+
+TEST_CASE("LPM Z - flags not affected", "[lpm_z][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    constexpr u8 sentinel = 0b11001010;
+    cpu.set_sreg(sentinel);
+    flash_write8(mem.flash(), 0x0010, 0xFF);
+    cpu.set_z(0x0010);
+    cpu.exec_lpm_z(encode_lpm_z(4));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+// ---------------------------------------------------------------------------
+// LPM Z+  (1001 000d dddd 0101)
+//
+// Loads flash[Z] into Rd, then increments Z by 1.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("LPM Z+ - byte at flash[Z] is loaded into Rd", "[lpm_z_post_inc][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    flash_write8(mem.flash(), 0x0040, 0xAB);
+    cpu.set_z(0x0040);
+    cpu.exec_lpm_z_post_inc(encode_lpm_z_post_inc(5));
+
+    REQUIRE(cpu.reg(5) == 0xAB);
+}
+
+TEST_CASE("LPM Z+ - Z is incremented by 1 after load", "[lpm_z_post_inc][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_z(0x0040);
+    cpu.exec_lpm_z_post_inc(encode_lpm_z_post_inc(5));
+
+    REQUIRE(cpu.z() == 0x0041);
+}
+
+TEST_CASE("LPM Z+ - load happens before increment (reads original Z address)", "[lpm_z_post_inc][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    flash_write8(mem.flash(), 0x0040, 0xAA); // original Z
+    flash_write8(mem.flash(), 0x0041, 0xBB); // post-increment address
+    cpu.set_z(0x0040);
+    cpu.exec_lpm_z_post_inc(encode_lpm_z_post_inc(5));
+
+    REQUIRE(cpu.reg(5) == 0xAA); // loaded from original, not incremented
+    REQUIRE(cpu.z()    == 0x0041);
+}
+
+TEST_CASE("LPM Z+ - Z wraps from 0xFFFF to 0x0000", "[lpm_z_post_inc][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_z(0xFFFF);
+    cpu.exec_lpm_z_post_inc(encode_lpm_z_post_inc(5));
+
+    REQUIRE(cpu.z() == 0x0000);
+}
+
+TEST_CASE("LPM Z+ - correct destination register selected (R0)", "[lpm_z_post_inc][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    flash_write8(mem.flash(), 0x0010, 0x11);
+    cpu.set_reg(1, 0x22); // decoy
+    cpu.set_z(0x0010);
+    cpu.exec_lpm_z_post_inc(encode_lpm_z_post_inc(0));
+
+    REQUIRE(cpu.reg(0) == 0x11);
+    REQUIRE(cpu.reg(1) == 0x22);
+}
+
+TEST_CASE("LPM Z+ - correct destination register selected (R29)", "[lpm_z_post_inc][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    flash_write8(mem.flash(), 0x0010, 0xCC);
+    cpu.set_reg(28, 0xFF); // decoy
+    cpu.set_z(0x0010);
+    cpu.exec_lpm_z_post_inc(encode_lpm_z_post_inc(29));
+
+    REQUIRE(cpu.reg(29) == 0xCC);
+    REQUIRE(cpu.reg(28) == 0xFF);
+}
+
+TEST_CASE("LPM Z+ - only target register written, adjacent unchanged", "[lpm_z_post_inc][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    flash_write8(mem.flash(), 0x0010, 0xDE);
+    cpu.set_reg(8, 0x00);
+    cpu.set_reg(9, 0x77); // decoy above
+    cpu.set_reg(7, 0x88); // decoy below
+    cpu.set_z(0x0010);
+    cpu.exec_lpm_z_post_inc(encode_lpm_z_post_inc(8));
+
+    REQUIRE(cpu.reg(8) == 0xDE);
+    REQUIRE(cpu.reg(9) == 0x77);
+    REQUIRE(cpu.reg(7) == 0x88);
+}
+
+TEST_CASE("LPM Z+ - flags not affected", "[lpm_z_post_inc][data_transfer]")
+{
+    auto cfg = make_lpm_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    constexpr u8 sentinel = 0b01011010;
+    cpu.set_sreg(sentinel);
+    flash_write8(mem.flash(), 0x0010, 0xFF);
+    cpu.set_z(0x0010);
+    cpu.exec_lpm_z_post_inc(encode_lpm_z_post_inc(4));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}

@@ -72,4 +72,26 @@ void AvrCpu::exec_sts(u16 opcode) {
     set_pc(pc() + 2);
 }
 
+void AvrCpu::exec_lpm(u16 opcode) {
+    // LPM
+    // 1001 0101 1100 1000
+    set_reg(0, mem_.fetch8(z()));
+}
+
+void AvrCpu::exec_lpm_z(u16 opcode) {
+    // LPM Z
+    // 1001 000d dddd 0100
+    u8 d = (opcode & 0x01F0) >> 4;
+    set_reg(d, mem_.fetch8(z()));
+}
+
+void AvrCpu::exec_lpm_z_post_inc(u16 opcode) {
+    // LPM Z+
+    // 1001 000d dddd 0101
+    u8 d = (opcode & 0x01F0) >> 4;
+    u16 addr = z();
+    set_reg(d, mem_.fetch8(addr));
+    set_z(addr + 1);
+}
+
 } // namespace avrion

@@ -15,6 +15,15 @@ namespace avrion
         cpu_ = cpu;
     }
 
+    u8 MemoryMap::fetch8(u32 flash_byte_addr) const
+    {
+        if (flash_byte_addr >= flash_.size())
+        {
+            return 0;
+        }
+        return flash_[flash_byte_addr];
+    }
+
     u16 MemoryMap::fetch16(u32 flash_byte_addr) const
     {
         if (flash_byte_addr + 1 >= flash_.size())

@@ -15,6 +15,7 @@ public:
   void attach_cpu(AvrCpu* cpu);
 
   // FLASH
+  u8  fetch8 (u32 flash_byte_addr) const;
   u16 fetch16(u32 flash_byte_addr) const;
   std::vector<u8>&       flash() { return flash_; }
   const std::vector<u8>& flash() const { return flash_; }

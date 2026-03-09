@@ -1027,3 +1027,267 @@ TEST_CASE("IN - flags not affected", "[in][data_transfer]")
 
     REQUIRE(cpu.sreg() == sentinel);
 }
+
+// ---------------------------------------------------------------------------
+// LDS  (1001 000d dddd 0000 | kkkk kkkk kkkk kkkk)
+//
+// Two-word instruction. The second word in flash (at pc()) holds the 16-bit
+// data address k. Reads mem[k] into Rd.
+// Flags: none affected. PC: not modified by exec_lds (caller manages advance).
+// ---------------------------------------------------------------------------
+
+// LDS  1001 000d dddd 0000
+//   d[4:0] → bits [8:4]
+static u16 encode_lds(u8 d)
+{
+    return static_cast<u16>(0x9000 | ((d & 0x1F) << 4));
+}
+
+// Helper: write a 16-bit little-endian word into flash at a byte address.
+static void lds_flash_write16(std::vector<u8>& flash, u32 byte_addr, u16 value)
+{
+    flash[byte_addr]     = static_cast<u8>(value & 0xFF);
+    flash[byte_addr + 1] = static_cast<u8>(value >> 8);
+}
+
+// Config with a simple SRAM region starting at 0x0100 (256 bytes).
+// flash_size_bytes provides room for test code at low byte addresses.
+static DeviceConfig make_lds_config()
+{
+    DeviceConfig c{};
+    c.flash_size_bytes = 32 * 1024;
+    c.sram_base        = 0x0100;
+    c.sram_size_bytes  = 256;
+    return c;
+}
+
+// ---------------------------------------------------------------------------
+// LDS — value / result tests
+// ---------------------------------------------------------------------------
+
+TEST_CASE("LDS - value at data address is loaded into Rd", "[lds][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(0x0110, 0xAB);
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0110); // second word = address 0x0110
+    cpu.exec_lds(encode_lds(5));
+
+    REQUIRE(cpu.reg(5) == 0xAB);
+}
+
+TEST_CASE("LDS - zero value at data address loads zero into Rd", "[lds][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(3, 0xFF); // pre-fill to confirm zero is actually written
+    // 0x0100 is zero-initialised
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0100);
+    cpu.exec_lds(encode_lds(3));
+
+    REQUIRE(cpu.reg(3) == 0x00);
+}
+
+TEST_CASE("LDS - 0xFF value at data address is loaded correctly", "[lds][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(0x0105, 0xFF);
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0105);
+    cpu.exec_lds(encode_lds(10));
+
+    REQUIRE(cpu.reg(10) == 0xFF);
+}
+
+TEST_CASE("LDS - source memory not modified after read", "[lds][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(0x0108, 0x42);
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0108);
+    cpu.exec_lds(encode_lds(7));
+
+    REQUIRE(mem.read8(0x0108) == 0x42);
+}
+
+// ---------------------------------------------------------------------------
+// LDS — destination register selection
+// ---------------------------------------------------------------------------
+
+TEST_CASE("LDS - correct destination register selected (R0)", "[lds][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(0x0100, 0x11);
+    cpu.set_reg(1, 0x22); // decoy
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0100);
+    cpu.exec_lds(encode_lds(0));
+
+    REQUIRE(cpu.reg(0) == 0x11);
+    REQUIRE(cpu.reg(1) == 0x22); // decoy unchanged
+}
+
+TEST_CASE("LDS - correct destination register selected (R31)", "[lds][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(0x0100, 0xCC);
+    cpu.set_reg(30, 0xFF); // decoy
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0100);
+    cpu.exec_lds(encode_lds(31));
+
+    REQUIRE(cpu.reg(31) == 0xCC);
+    REQUIRE(cpu.reg(30) == 0xFF); // decoy unchanged
+}
+
+TEST_CASE("LDS - correct destination register selected (R16, upper half)", "[lds][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(0x0112, 0x9D);
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0112);
+    cpu.exec_lds(encode_lds(16));
+
+    REQUIRE(cpu.reg(16) == 0x9D);
+}
+
+TEST_CASE("LDS - only the target register is written, adjacent unchanged", "[lds][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(0x0100, 0xDE);
+    cpu.set_reg(8, 0x00);
+    cpu.set_reg(9, 0x77); // decoy above
+    cpu.set_reg(7, 0x88); // decoy below
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0100);
+    cpu.exec_lds(encode_lds(8));
+
+    REQUIRE(cpu.reg(8) == 0xDE);
+    REQUIRE(cpu.reg(9) == 0x77);
+    REQUIRE(cpu.reg(7) == 0x88);
+}
+
+// ---------------------------------------------------------------------------
+// LDS — address word read from the correct flash position (pc())
+// ---------------------------------------------------------------------------
+
+TEST_CASE("LDS - address word is read from flash at pc()", "[lds][data_transfer]")
+{
+    // PC = 4: the address word must be read from byte offset 4, not offset 2.
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(0x0110, 0xBB);
+    cpu.set_pc(4);
+    lds_flash_write16(mem.flash(), 4, 0x0110); // correct slot
+    lds_flash_write16(mem.flash(), 2, 0xFFFF); // wrong slot — must not be used
+    cpu.exec_lds(encode_lds(5));
+
+    REQUIRE(cpu.reg(5) == 0xBB);
+}
+
+TEST_CASE("LDS - address low byte decoded correctly", "[lds][data_transfer]")
+{
+    // k = 0x0115: low byte = 0x15 drives address within the SRAM page
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(0x0115, 0x77);
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0115);
+    cpu.exec_lds(encode_lds(4));
+
+    REQUIRE(cpu.reg(4) == 0x77);
+}
+
+TEST_CASE("LDS - address high byte decoded correctly", "[lds][data_transfer]")
+{
+    // k = 0x0100: high byte = 0x01 selects the correct SRAM page.
+    // If the high byte were ignored the read would target 0x0000 (not SRAM) and return 0.
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    mem.write8(0x0100, 0xD3);
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0100);
+    cpu.exec_lds(encode_lds(6));
+
+    REQUIRE(cpu.reg(6) == 0xD3);
+}
+
+// ---------------------------------------------------------------------------
+// LDS — PC advanced past the address word
+// ---------------------------------------------------------------------------
+
+TEST_CASE("LDS - PC is advanced by 2 after reading the address word", "[lds][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0100);
+    cpu.exec_lds(encode_lds(5));
+
+    REQUIRE(cpu.pc() == 4u);
+}
+
+// ---------------------------------------------------------------------------
+// LDS — flags not affected
+// ---------------------------------------------------------------------------
+
+TEST_CASE("LDS - flags not affected", "[lds][data_transfer]")
+{
+    auto cfg = make_lds_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    constexpr u8 sentinel = 0b10110101;
+    cpu.set_sreg(sentinel);
+    mem.write8(0x0100, 0xFF);
+    cpu.set_pc(2);
+    lds_flash_write16(mem.flash(), 2, 0x0100);
+    cpu.exec_lds(encode_lds(4));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}

@@ -48,6 +48,7 @@ public:
   void exec_st_x(u16 opcode);
   void exec_st_x_post_inc(u16 opcode);
   void exec_st_x_pre_dec(u16 opcode);
+  void exec_lds(u16 opcode);
 
   // Branching
   void exec_jmp(u16 opcode);

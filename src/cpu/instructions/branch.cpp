@@ -7,7 +7,7 @@ void AvrCpu::exec_jmp(u16 opcode) {
     // JMP
     // 1001 010k kkkk 110k
     // kkkk kkkk kkkk kkkk
-    u32 k = ((opcode & 0x01F0) << 13) | ((opcode & 0x0001) << 16) | mem_.fetch16(st_.pc);
+    u32 k = ((opcode & 0x01F0) << 13) | ((opcode & 0x0001) << 16) | mem_.fetch16(pc());
     set_pc(k << 1);
 }
 
@@ -39,7 +39,7 @@ void AvrCpu::exec_call(u16 opcode) {
     // CALL
     // 1001 010k kkkk 111k
     // kkkk kkkk kkkk kkkk
-    u32 k = ((opcode & 0x01F0) << 13) | ((opcode & 0x0001) << 16) | mem_.fetch16(st_.pc);
+    u32 k = ((opcode & 0x01F0) << 13) | ((opcode & 0x0001) << 16) | mem_.fetch16(pc());
     u32 ret = pc() + 4;
     mem_.write8(st_.sp, ret & 0xFF);
     mem_.write8(--st_.sp, (ret >> 8) & 0xFF);

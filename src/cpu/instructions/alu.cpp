@@ -89,4 +89,24 @@ void AvrCpu::exec_ori(u16 opcode) {
     set_sreg(_sreg);
 }
 
+void AvrCpu::exec_and(u16 opcode) {
+    // AND
+    // 0010 00rd dddd rrrr
+    u8 d = (opcode >> 4) & 0x1F;
+    u8 r = (opcode & 0x000F) | ((opcode >> 5) & 0x10);
+    u8 result = reg(d) & reg(r);
+    set_reg(d, result);
+
+    u8 _sreg = sreg();
+    _sreg = result == 0
+        ? (_sreg | 0x02) : (_sreg & ~0x02u); // Z set if result is zero
+    _sreg = (result & 0x80) != 0
+        ? (_sreg | 0x04) : (_sreg & ~0x04); // N set if bit 7 of result is set
+    _sreg = (_sreg & ~0x08u); // V cleared
+    // S = N XOR V; since V is always 0 for AND, S = N
+    _sreg = (_sreg & 0x04)
+        ? (_sreg | 0x10) : (_sreg & ~0x10);
+    set_sreg(_sreg);
+}
+
 } // namespace avrion

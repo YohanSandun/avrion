@@ -43,6 +43,7 @@ public:
   void exec_cpi(u16 opcode);
   void exec_cpc(u16 opcode);
   void exec_ori(u16 opcode);
+  void exec_and(u16 opcode);
 
   // Data transfer
   void exec_out(u16 opcode);

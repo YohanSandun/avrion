@@ -240,6 +240,247 @@ TEST_CASE("EOR - C flag not affected", "[eor][alu]")
 }
 
 // ---------------------------------------------------------------------------
+// AND  (0010 00rd dddd rrrr)
+//
+// Operation : Rd ← Rd & Rr
+// Flags     : Z = (result == 0), N = result[7], V = 0, S = N XOR V = N
+//             C and H are unaffected.
+// ---------------------------------------------------------------------------
+
+// Encode AND Rd, Rr opcode from register indices.
+static u16 encode_and(u8 d, u8 r)
+{
+    return static_cast<u16>(0x2000
+        | ((d & 0x1F) << 4)
+        | ((r & 0x10) << 5)
+        | (r & 0x0F));
+}
+
+// ---------------------------------------------------------------------------
+// Result and register tests
+// ---------------------------------------------------------------------------
+
+TEST_CASE("AND - basic AND of two values", "[and][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(1, 0xAA);
+    cpu.set_reg(2, 0x55);
+    cpu.exec_and(encode_and(1, 2));
+
+    REQUIRE(cpu.reg(1) == 0x00);
+    REQUIRE(cpu.reg(2) == 0x55); // source register unchanged
+}
+
+TEST_CASE("AND - result stored in Rd, Rr unchanged", "[and][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(5, 0x0F);
+    cpu.set_reg(6, 0xF0);
+    cpu.exec_and(encode_and(5, 6));
+
+    REQUIRE(cpu.reg(5) == 0x00);
+    REQUIRE(cpu.reg(6) == 0xF0);
+}
+
+TEST_CASE("AND - self-AND preserves register (no change)", "[and][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(3, 0xAB);
+    cpu.exec_and(encode_and(3, 3));
+
+    REQUIRE(cpu.reg(3) == 0xAB);
+}
+
+TEST_CASE("AND - works with upper registers R16-R31", "[and][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0b10110011);
+    cpu.set_reg(17, 0b01001100);
+    cpu.exec_and(encode_and(16, 17));
+
+    REQUIRE(cpu.reg(16) == 0b00000000);
+}
+
+// ---------------------------------------------------------------------------
+// Z flag (Zero)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("AND - Z set when result is zero", "[and][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0x00);
+    cpu.set_reg(17, 0x00);
+    cpu.exec_and(encode_and(16, 17));
+
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+}
+
+TEST_CASE("AND - Z cleared when result is non-zero", "[and][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // pre-set Z
+    cpu.set_reg(16, 0x01);
+    cpu.set_reg(17, 0x01);
+    cpu.exec_and(encode_and(16, 17));
+
+    REQUIRE((cpu.sreg() & SREG_Z) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// N flag (Negative)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("AND - N set when bit 7 of result is set", "[and][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0x80);
+    cpu.set_reg(17, 0xFF);
+    cpu.exec_and(encode_and(16, 17)); // result = 0x80 → bit 7 set
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+}
+
+TEST_CASE("AND - N cleared when bit 7 of result is clear", "[and][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // pre-set N
+    cpu.set_reg(16, 0x7F);
+    cpu.set_reg(17, 0xFF);
+    cpu.exec_and(encode_and(16, 17)); // result = 0x7F → bit 7 clear
+
+    REQUIRE((cpu.sreg() & SREG_N) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// V flag (Overflow) — always cleared by AND
+// ---------------------------------------------------------------------------
+
+TEST_CASE("AND - V always cleared", "[and][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // pre-set V
+    cpu.set_reg(16, 0x80);
+    cpu.set_reg(17, 0xFF);
+    cpu.exec_and(encode_and(16, 17));
+
+    REQUIRE((cpu.sreg() & SREG_V) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// S flag (Sign = N XOR V)
+// Since V is always 0 after AND, S == N.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("AND - S set when N=1 (result bit 7 set)", "[and][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0x80);
+    cpu.set_reg(17, 0xFF);
+    cpu.exec_and(encode_and(16, 17)); // N=1, V=0 → S=1
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+    REQUIRE((cpu.sreg() & SREG_S) != 0);
+}
+
+TEST_CASE("AND - S cleared when N=0 (result bit 7 clear)", "[and][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // pre-set S
+    cpu.set_reg(16, 0x01);
+    cpu.set_reg(17, 0x01);
+    cpu.exec_and(encode_and(16, 17)); // N=0, V=0 → S=0
+
+    REQUIRE((cpu.sreg() & SREG_S) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// C flag — must not be modified by AND
+// ---------------------------------------------------------------------------
+
+TEST_CASE("AND - C flag not affected", "[and][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // C set before AND — must remain set
+    cpu.set_sreg(SREG_C);
+    cpu.set_reg(16, 0x01);
+    cpu.set_reg(17, 0x01);
+    cpu.exec_and(encode_and(16, 17));
+
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+
+    // C clear before AND — must remain clear
+    cpu.set_sreg(0x00);
+    cpu.set_reg(16, 0x01);
+    cpu.set_reg(17, 0x01);
+    cpu.exec_and(encode_and(16, 17));
+
+    REQUIRE((cpu.sreg() & SREG_C) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// H flag — must not be modified by AND
+// ---------------------------------------------------------------------------
+
+TEST_CASE("AND - H flag not affected", "[and][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // H set before AND — must remain set
+    cpu.set_sreg(SREG_H);
+    cpu.set_reg(16, 0x01);
+    cpu.set_reg(17, 0x01);
+    cpu.exec_and(encode_and(16, 17));
+
+    REQUIRE((cpu.sreg() & SREG_H) != 0);
+
+    // H clear before AND — must remain clear
+    cpu.set_sreg(0x00);
+    cpu.set_reg(16, 0x01);
+    cpu.set_reg(17, 0x01);
+    cpu.exec_and(encode_and(16, 17));
+
+    REQUIRE((cpu.sreg() & SREG_H) == 0);
+}
+
+// ---------------------------------------------------------------------------
 // CPI  (0011 KKKK dddd KKKK)
 //
 // Operation : Rd - K  (result discarded, only flags updated)

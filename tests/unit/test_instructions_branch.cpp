@@ -393,3 +393,248 @@ TEST_CASE("BRNE - only Z bit matters: other flags set but Z=0 still branches", "
 
     REQUIRE(cpu.pc() == 26u);
 }
+
+// ---------------------------------------------------------------------------
+// CALL  (1001 010k kkkk 111k  +  kkkk kkkk kkkk kkkk)
+//
+// Pushes ret = pc() + 4 onto the stack (low byte first, then high byte),
+// then jumps to byte address k << 1.
+// For 22-bit PC devices an extra upper byte is also pushed.
+// Stack layout after a 16-bit-PC push:
+//   [initial_SP]     = ret_lo
+//   [initial_SP - 1] = ret_hi
+//   SP_after = initial_SP - 1
+// Flags: none affected.
+// ---------------------------------------------------------------------------
+
+// Encode the first word of CALL: k[21:17] → bits [8:4], k[16] → bit [0].
+// Write the second word (k[15:0]) separately with flash_write16.
+static u16 encode_call(u32 k)
+{
+    return static_cast<u16>(0x940E
+        | ((k >> 13) & 0x01F0)   // k[21:17] → bits [8:4]
+        | ((k >> 16) & 0x0001)); // k[16]    → bit  [0]
+}
+
+// Config with 256 KB flash for tests whose target address exceeds 32 KB.
+static DeviceConfig make_large_flash_config()
+{
+    DeviceConfig c{};
+    c.flash_size_bytes = 256 * 1024;
+    c.sram_size_bytes  = 2 * 1024;
+    c.sram_base        = 0x0100;
+    return c;
+}
+
+static DeviceConfig make_22bit_pc_config()
+{
+    DeviceConfig c{};
+    c.flash_size_bytes = 256 * 1024;
+    c.sram_size_bytes  = 2 * 1024;
+    c.sram_base        = 0x0100;
+    c.has_22_bit_pc    = true;
+    return c;
+}
+
+// Initial SP for both make_test_config() and make_large_flash_config():
+//   st_.sp = sram_size_bytes - 1 = 2047 = 0x07FF
+static constexpr u16 INITIAL_SP = 0x07FFu;
+
+TEST_CASE("CALL - PC jumps to decoded target (k in second word)", "[call]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    // PC already past first word (mimics step_instruction advancing by 2).
+    // Second word = 0x0050 → k = 0x0050 → target byte addr = 0x00A0.
+    cpu.set_pc(2);
+    flash_write16(mem.flash(), 2, 0x0050);
+
+    cpu.exec_call(encode_call(0));
+
+    REQUIRE(cpu.pc() == 0x00A0u);
+}
+
+TEST_CASE("CALL - return address low byte pushed to stack", "[call]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    // PC = 0x0100 → ret = pc() + 4 = 0x0104.
+    // Low byte = 0x04 should land at initial SP (0x07FF).
+    cpu.set_pc(0x0100);
+    flash_write16(mem.flash(), 0x0100, 0x0001); // target word — value doesn't matter here
+
+    cpu.exec_call(encode_call(0));
+
+    REQUIRE(mem.read8(INITIAL_SP) == 0x04u);
+}
+
+TEST_CASE("CALL - return address high byte pushed to stack", "[call]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    // PC = 0x0100 → ret = 0x0104. High byte = 0x01 should land at initial SP - 1.
+    cpu.set_pc(0x0100);
+    flash_write16(mem.flash(), 0x0100, 0x0001);
+
+    cpu.exec_call(encode_call(0));
+
+    REQUIRE(mem.read8(INITIAL_SP - 1) == 0x01u);
+}
+
+TEST_CASE("CALL - SP decremented by 1 after 16-bit-PC push", "[call]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_pc(2);
+    flash_write16(mem.flash(), 2, 0x0001);
+
+    cpu.exec_call(encode_call(0));
+
+    REQUIRE(cpu.sp() == INITIAL_SP - 1);
+}
+
+TEST_CASE("CALL - return address uses pc() at call time, not original instruction address", "[call]")
+{
+    // With PC = 0x0200 at call time, ret = 0x0204 (pc() + 4).
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_pc(0x0200);
+    flash_write16(mem.flash(), 0x0200, 0x0001);
+
+    cpu.exec_call(encode_call(0));
+
+    // Low = 0x04, high = 0x02
+    REQUIRE(mem.read8(INITIAL_SP)     == 0x04u);
+    REQUIRE(mem.read8(INITIAL_SP - 1) == 0x02u);
+}
+
+TEST_CASE("CALL - k[16] bit decoded from opcode bit 0", "[call]")
+{
+    // k = 0x10000, second word = 0x0000 → target byte = 0x20000.
+    auto cfg = make_large_flash_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_pc(2);
+    flash_write16(mem.flash(), 2, 0x0000); // k[15:0] = 0
+
+    cpu.exec_call(encode_call(0x10000));   // k[16] = 1 → opcode bit[0] = 1
+
+    REQUIRE(cpu.pc() == 0x20000u);
+}
+
+TEST_CASE("CALL - k[21:17] bits decoded from opcode bits [8:4]", "[call]")
+{
+    // k = 0x1E0000 (bits [20:17] all set), second word = 0x0000 → target byte = 0x3C0000.
+    auto cfg = make_large_flash_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_pc(2);
+    flash_write16(mem.flash(), 2, 0x0000);
+
+    cpu.exec_call(encode_call(0x1E0000)); // k[20:17] = 0b1111 → opcode bits [8:5] = 0b1111
+
+    REQUIRE(cpu.pc() == 0x3C0000u);
+}
+
+TEST_CASE("CALL - second word and first-word k bits combined into target", "[call]")
+{
+    // k = 0x10050 (bit[16]=1, low word=0x0050) → target = 0x200A0.
+    auto cfg = make_large_flash_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_pc(2);
+    flash_write16(mem.flash(), 2, 0x0050);   // k[15:0]
+
+    cpu.exec_call(encode_call(0x10050));      // k[16] = 1
+
+    REQUIRE(cpu.pc() == 0x200A0u);
+}
+
+TEST_CASE("CALL - second word is read relative to PC at call time", "[call]")
+{
+    // Second word must be fetched from pc = 6, NOT from 2.
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_pc(6);
+    flash_write16(mem.flash(), 6, 0x0050); // correct slot
+    flash_write16(mem.flash(), 2, 0xFFFF); // wrong slot — must not be used
+
+    cpu.exec_call(encode_call(0));
+
+    REQUIRE(cpu.pc() == 0x00A0u);
+}
+
+TEST_CASE("CALL - 22-bit PC: upper ret byte pushed to stack", "[call][22bit]")
+{
+    // PC = 0x0100 → ret = 0x0104. With 22-bit PC, byte 2 of ret (0x00) is
+    // also pushed: stack = [..., 0x00, 0x01, 0x04] at SP, SP-1, SP-2.
+    auto cfg = make_22bit_pc_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_pc(0x0100);
+    flash_write16(mem.flash(), 0x0100, 0x0001);
+
+    cpu.exec_call(encode_call(0));
+
+    REQUIRE(mem.read8(INITIAL_SP)     == 0x04u); // ret_lo
+    REQUIRE(mem.read8(INITIAL_SP - 1) == 0x01u); // ret_hi
+    REQUIRE(mem.read8(INITIAL_SP - 2) == 0x00u); // ret byte 2
+}
+
+TEST_CASE("CALL - 22-bit PC: SP decremented by 2", "[call][22bit]")
+{
+    auto cfg = make_22bit_pc_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_pc(2);
+    flash_write16(mem.flash(), 2, 0x0001);
+
+    cpu.exec_call(encode_call(0));
+
+    REQUIRE(cpu.sp() == INITIAL_SP - 2);
+}
+
+TEST_CASE("CALL - flags not affected", "[call]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    constexpr u8 sentinel = 0b10110101;
+    cpu.set_sreg(sentinel);
+    cpu.set_pc(2);
+    flash_write16(mem.flash(), 2, 0x0001);
+
+    cpu.exec_call(encode_call(0));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}

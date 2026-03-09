@@ -15,6 +15,8 @@ namespace avrion
             DeviceConfig c;
             c.name = "ATmega328P";
 
+            c.has_22_bit_pc = false;
+
             c.flash_size_bytes = 32 * 1024;
             c.sram_size_bytes = 2 * 1024;
 

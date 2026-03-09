@@ -47,7 +47,8 @@ namespace avrion
         }
 
         (this->*(desc->exec))(opcode);
-        return desc->cycles;
+        const u8 cycles = cfg_.has_22_bit_pc ? desc->cycles_22bit_pc : desc->cycles;
+        return cycles;
     }
 
     u16 AvrCpu::x() const

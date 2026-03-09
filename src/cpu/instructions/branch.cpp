@@ -35,4 +35,18 @@ void AvrCpu::exec_brne(u16 opcode) {
     set_pc(pc() + static_cast<u32>(static_cast<int16_t>(k) << 1));
 }
 
+void AvrCpu::exec_call(u16 opcode) {
+    // CALL
+    // 1001 010k kkkk 111k
+    // kkkk kkkk kkkk kkkk
+    u32 k = ((opcode & 0x01F0) << 13) | ((opcode & 0x0001) << 16) | mem_.fetch16(st_.pc);
+    u32 ret = pc() + 4;
+    mem_.write8(st_.sp, ret & 0xFF);
+    mem_.write8(--st_.sp, (ret >> 8) & 0xFF);
+    if (cfg_.has_22_bit_pc) {
+        mem_.write8(--st_.sp, (ret >> 16) & 0xFF);
+    }
+    set_pc(k << 1);
+}
+
 } // namespace avrion

@@ -10,7 +10,8 @@ struct InstructionDesc {
     u16 mask;
     u16 pattern;
     const char* name;
-    u8 cycles;
+    u8 cycles;          // cycles for 16-bit PC devices
+    u8 cycles_22bit_pc; // cycles for 22-bit PC devices (0 = same as cycles)
     InstrExecFn exec;
 };
 

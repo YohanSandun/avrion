@@ -17,6 +17,8 @@ struct IoRegion {
 struct DeviceConfig {
   std::string_view name;
 
+  bool has_22_bit_pc = false; // e.g., AVR8 has 16-bit PC, AVR32 has 22-bit PC
+
   // Flash (program memory)
   u32 flash_size_bytes = 0;
 

@@ -45,6 +45,7 @@ public:
   u8 exec_ori(u16 opcode);
   u8 exec_and(u16 opcode);
   u8 exec_add(u16 opcode);
+  u8 exec_adc(u16 opcode);
 
   // Data transfer
   u8 exec_out(u16 opcode);

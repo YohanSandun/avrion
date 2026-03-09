@@ -609,6 +609,141 @@ TEST_CASE("ADD - works with R31 (highest register)", "[add][alu]")
 }
 
 // ---------------------------------------------------------------------------
+// ADC  (0001 11rd dddd rrrr)
+//
+// Operation : Rd ← Rd + Rr + C
+// Flags     : C, Z, N, V, S (N XOR V), H
+// ---------------------------------------------------------------------------
+
+// Encode ADC Rd, Rr opcode from register indices.
+static u16 encode_adc(u8 d, u8 r)
+{
+    return static_cast<u16>(0x1C00
+        | ((d & 0x1F) << 4)
+        | ((r & 0x10) << 5)
+        | (r & 0x0F));
+}
+
+TEST_CASE("ADC - basic addition with carry-in", "[adc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(1, 0x10);
+    cpu.set_reg(2, 0x20);
+    cpu.set_sreg(SREG_C); // carry-in = 1
+    cpu.exec_adc(encode_adc(1, 2));
+
+    REQUIRE(cpu.reg(1) == 0x31);
+    REQUIRE(cpu.reg(2) == 0x20);
+}
+
+TEST_CASE("ADC - zero result with carry produces Z and C", "[adc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(10, 0xFF);
+    cpu.set_reg(11, 0x00);
+    cpu.set_sreg(SREG_C); // +1 -> 0x100
+    cpu.exec_adc(encode_adc(10, 11));
+
+    REQUIRE(cpu.reg(10) == 0x00);
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+}
+
+TEST_CASE("ADC - half carry H set on carry from bit 3", "[adc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(6, 0x08);
+    cpu.set_reg(7, 0x07);
+    cpu.set_sreg(SREG_C); // 0x08 + 0x07 + 1 = 0x10 -> half carry from bit3
+    cpu.exec_adc(encode_adc(6, 7));
+
+    REQUIRE((cpu.sreg() & SREG_H) != 0);
+}
+
+TEST_CASE("ADC - V (overflow) set on signed overflow (positive+positive+carry->negative)", "[adc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(4, 0x7F);
+    cpu.set_reg(5, 0x00);
+    cpu.set_sreg(SREG_C); // +1 -> 0x80
+    cpu.exec_adc(encode_adc(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_V) != 0);
+}
+
+TEST_CASE("ADC - N set when result bit 7 is set", "[adc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(8, 0x40);
+    cpu.set_reg(9, 0x40);
+    cpu.set_sreg(0x00);
+    cpu.exec_adc(encode_adc(8, 9)); // 0x40 + 0x40 + 0 = 0x80 -> N set
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+}
+
+TEST_CASE("ADC - S = N XOR V behavior", "[adc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x7F + 0x00 + 1 = 0x80 -> N=1, V=1 -> S=0
+    cpu.set_reg(12, 0x7F);
+    cpu.set_reg(13, 0x00);
+    cpu.set_sreg(SREG_C);
+    cpu.exec_adc(encode_adc(12, 13));
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+    REQUIRE((cpu.sreg() & SREG_V) != 0);
+    REQUIRE(((cpu.sreg() & SREG_S) == 0));
+}
+
+TEST_CASE("ADC - T and I flags preserved", "[adc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xC0); // T and I set
+    cpu.set_reg(2, 0x01);
+    cpu.set_reg(3, 0x02);
+    cpu.exec_adc(encode_adc(2, 3));
+
+    REQUIRE((cpu.sreg() & 0xC0) == 0xC0);
+}
+
+TEST_CASE("ADC - works with R31 (highest register)", "[adc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(31, 0x10);
+    cpu.set_reg(30, 0x20);
+    cpu.set_sreg(SREG_C);
+    cpu.exec_adc(encode_adc(31, 30));
+
+    REQUIRE(cpu.reg(31) == 0x31);
+    REQUIRE(cpu.reg(30) == 0x20);
+}
+
+// ---------------------------------------------------------------------------
 // CPI  (0011 KKKK dddd KKKK)
 //
 // Operation : Rd - K  (result discarded, only flags updated)

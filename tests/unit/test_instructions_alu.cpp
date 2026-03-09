@@ -782,6 +782,307 @@ TEST_CASE("CPC - V set on signed overflow (positive minus negative overflows to 
     REQUIRE((cpu.sreg() & SREG_V) != 0);
 }
 
+// ---------------------------------------------------------------------------
+// ORI  (0110 KKKK dddd KKKK)
+//
+// Operation : Rd ← Rd | K
+// Operands  : Rd ∈ R16–R31, K ∈ 0–255
+// Flags     : Z = (result == 0), N = result[7], V = 0, S = N XOR V = N
+//             C and H are unaffected.
+// ---------------------------------------------------------------------------
+
+// Encode ORI Rd, K opcode.
+static u16 encode_ori(u8 d, u8 k)
+{
+    u8 d_off = d - 16; // 4-bit offset into R16–R31
+    return static_cast<u16>(0x6000
+        | ((k & 0xF0) << 4)       // K[7:4] → bits [11:8]
+        | ((d_off & 0x0F) << 4)   // d offset → bits [7:4]
+        | (k & 0x0F));            // K[3:0] → bits [3:0]
+}
+
+// ---------------------------------------------------------------------------
+// Result and register tests
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ORI - result is OR of Rd and K", "[ori][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0xA0);
+    cpu.exec_ori(encode_ori(16, 0x0F)); // 0xA0 | 0x0F = 0xAF
+
+    REQUIRE(cpu.reg(16) == 0xAF);
+}
+
+TEST_CASE("ORI - OR with 0x00 leaves Rd unchanged", "[ori][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(20, 0x5A);
+    cpu.exec_ori(encode_ori(20, 0x00));
+
+    REQUIRE(cpu.reg(20) == 0x5A);
+}
+
+TEST_CASE("ORI - OR with 0xFF sets Rd to 0xFF", "[ori][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(18, 0x00);
+    cpu.exec_ori(encode_ori(18, 0xFF));
+
+    REQUIRE(cpu.reg(18) == 0xFF);
+}
+
+TEST_CASE("ORI - individual bits are set correctly", "[ori][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0b10100000);
+    cpu.exec_ori(encode_ori(16, 0b01000101)); // 0b10100000 | 0b01000101 = 0b11100101
+
+    REQUIRE(cpu.reg(16) == 0b11100101);
+}
+
+// ---------------------------------------------------------------------------
+// Destination register selection
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ORI - correct destination register selected (R16)", "[ori][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0x10);
+    cpu.set_reg(17, 0x22); // decoy
+    cpu.exec_ori(encode_ori(16, 0x01));
+
+    REQUIRE(cpu.reg(16) == 0x11);
+    REQUIRE(cpu.reg(17) == 0x22); // adjacent unchanged
+}
+
+TEST_CASE("ORI - correct destination register selected (R31)", "[ori][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(31, 0x40);
+    cpu.set_reg(30, 0xFF); // decoy
+    cpu.exec_ori(encode_ori(31, 0x08));
+
+    REQUIRE(cpu.reg(31) == 0x48);
+    REQUIRE(cpu.reg(30) == 0xFF); // adjacent unchanged
+}
+
+TEST_CASE("ORI - correct destination register selected (R24, mid-range)", "[ori][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(24, 0x01);
+    cpu.exec_ori(encode_ori(24, 0x80));
+
+    REQUIRE(cpu.reg(24) == 0x81);
+}
+
+// ---------------------------------------------------------------------------
+// Immediate decoding
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ORI - K high nibble decoded correctly", "[ori][alu]")
+{
+    // K = 0xA0: only high nibble set
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0x00);
+    cpu.exec_ori(encode_ori(16, 0xA0));
+
+    REQUIRE(cpu.reg(16) == 0xA0);
+}
+
+TEST_CASE("ORI - K low nibble decoded correctly", "[ori][alu]")
+{
+    // K = 0x0B: only low nibble set
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0x00);
+    cpu.exec_ori(encode_ori(16, 0x0B));
+
+    REQUIRE(cpu.reg(16) == 0x0B);
+}
+
+// ---------------------------------------------------------------------------
+// Z flag (Zero)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ORI - Z set when both Rd and K are zero", "[ori][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0x00);
+    cpu.exec_ori(encode_ori(16, 0x00));
+
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+}
+
+TEST_CASE("ORI - Z cleared when result is non-zero", "[ori][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // pre-set Z
+    cpu.set_reg(16, 0x00);
+    cpu.exec_ori(encode_ori(16, 0x01));
+
+    REQUIRE((cpu.sreg() & SREG_Z) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// N flag (Negative)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ORI - N set when bit 7 of result is set", "[ori][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0x00);
+    cpu.exec_ori(encode_ori(16, 0x80)); // result = 0x80 → bit 7 set
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+}
+
+TEST_CASE("ORI - N cleared when bit 7 of result is clear", "[ori][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // pre-set N
+    cpu.set_reg(16, 0x00);
+    cpu.exec_ori(encode_ori(16, 0x7F)); // result = 0x7F → bit 7 clear
+
+    REQUIRE((cpu.sreg() & SREG_N) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// V flag (Overflow) — always cleared by ORI
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ORI - V always cleared", "[ori][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // pre-set V
+    cpu.set_reg(16, 0x00);
+    cpu.exec_ori(encode_ori(16, 0x80));
+
+    REQUIRE((cpu.sreg() & SREG_V) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// S flag (Sign = N XOR V)
+// Since V is always 0 after ORI, S == N.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ORI - S set when N=1 (result bit 7 set)", "[ori][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0x00);
+    cpu.exec_ori(encode_ori(16, 0x80)); // N=1, V=0 → S=1
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+    REQUIRE((cpu.sreg() & SREG_S) != 0);
+}
+
+TEST_CASE("ORI - S cleared when N=0 (result bit 7 clear)", "[ori][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // pre-set S
+    cpu.set_reg(16, 0x00);
+    cpu.exec_ori(encode_ori(16, 0x01)); // N=0, V=0 → S=0
+
+    REQUIRE((cpu.sreg() & SREG_S) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// C flag — must not be modified by ORI
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ORI - C flag not affected", "[ori][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // C set before ORI — must remain set
+    cpu.set_sreg(SREG_C);
+    cpu.set_reg(16, 0x00);
+    cpu.exec_ori(encode_ori(16, 0x01));
+
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+
+    // C clear before ORI — must remain clear
+    cpu.set_sreg(0x00);
+    cpu.set_reg(16, 0x00);
+    cpu.exec_ori(encode_ori(16, 0x01));
+
+    REQUIRE((cpu.sreg() & SREG_C) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// H flag — must not be modified by ORI
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ORI - H flag not affected", "[ori][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // H set before ORI — must remain set
+    cpu.set_sreg(SREG_H);
+    cpu.set_reg(16, 0x00);
+    cpu.exec_ori(encode_ori(16, 0x01));
+
+    REQUIRE((cpu.sreg() & SREG_H) != 0);
+
+    // H clear before ORI — must remain clear
+    cpu.set_sreg(0x00);
+    cpu.set_reg(16, 0x00);
+    cpu.exec_ori(encode_ori(16, 0x01));
+
+    REQUIRE((cpu.sreg() & SREG_H) == 0);
+}
+
 TEST_CASE("CPC - V set on signed overflow (negative minus positive overflows to positive)", "[cpc][alu]")
 {
     auto cfg = make_test_config();

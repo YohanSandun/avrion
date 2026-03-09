@@ -481,6 +481,134 @@ TEST_CASE("AND - H flag not affected", "[and][alu]")
 }
 
 // ---------------------------------------------------------------------------
+// ADD  (0000 11rd dddd rrrr)
+//
+// Operation : Rd ← Rd + Rr
+// Flags     : C, Z, N, V, S (N XOR V), H
+// ---------------------------------------------------------------------------
+
+// Encode ADD Rd, Rr opcode from register indices.
+static u16 encode_add(u8 d, u8 r)
+{
+    return static_cast<u16>(0x0C00
+        | ((d & 0x1F) << 4)
+        | ((r & 0x10) << 5)
+        | (r & 0x0F));
+}
+
+TEST_CASE("ADD - basic addition stores sum and preserves source", "[add][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(1, 0x10);
+    cpu.set_reg(2, 0x20);
+    cpu.exec_add(encode_add(1, 2));
+
+    REQUIRE(cpu.reg(1) == 0x30);
+    REQUIRE(cpu.reg(2) == 0x20);
+}
+
+TEST_CASE("ADD - result zero sets Z and may set C (overflow)", "[add][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(10, 0xFF);
+    cpu.set_reg(11, 0x01);
+    cpu.exec_add(encode_add(10, 11)); // 0xFF + 0x01 = 0x00
+
+    REQUIRE(cpu.reg(10) == 0x00);
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+}
+
+TEST_CASE("ADD - half carry H set on carry from bit 3", "[add][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(6, 0x08);
+    cpu.set_reg(7, 0x08);
+    cpu.exec_add(encode_add(6, 7)); // 0x08 + 0x08 = 0x10 -> H set
+
+    REQUIRE((cpu.sreg() & SREG_H) != 0);
+}
+
+TEST_CASE("ADD - V (overflow) set on signed overflow (positive+positive->negative)", "[add][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(4, 0x7F);
+    cpu.set_reg(5, 0x01);
+    cpu.exec_add(encode_add(4, 5)); // 0x7F + 0x01 = 0x80 -> V set
+
+    REQUIRE((cpu.sreg() & SREG_V) != 0);
+}
+
+TEST_CASE("ADD - N set when result bit 7 is set", "[add][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(8, 0x40);
+    cpu.set_reg(9, 0x40);
+    cpu.exec_add(encode_add(8, 9)); // 0x40 + 0x40 = 0x80 -> N set
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+}
+
+TEST_CASE("ADD - S = N XOR V behaviour", "[add][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // positive + positive -> negative: V=1, N=1 -> S=0
+    cpu.set_reg(12, 0x7F);
+    cpu.set_reg(13, 0x01);
+    cpu.exec_add(encode_add(12, 13)); // result 0x80
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+    REQUIRE((cpu.sreg() & SREG_V) != 0);
+    REQUIRE(((cpu.sreg() & SREG_S) == 0));
+}
+
+TEST_CASE("ADD - T and I flags preserved", "[add][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xC0); // T and I set
+    cpu.set_reg(2, 0x01);
+    cpu.set_reg(3, 0x02);
+    cpu.exec_add(encode_add(2, 3));
+
+    REQUIRE((cpu.sreg() & 0xC0) == 0xC0);
+}
+
+TEST_CASE("ADD - works with R31 (highest register)", "[add][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(31, 0x10);
+    cpu.set_reg(30, 0x20);
+    cpu.exec_add(encode_add(31, 30));
+
+    REQUIRE(cpu.reg(31) == 0x30);
+    REQUIRE(cpu.reg(30) == 0x20);
+}
+
+// ---------------------------------------------------------------------------
 // CPI  (0011 KKKK dddd KKKK)
 //
 // Operation : Rd - K  (result discarded, only flags updated)

@@ -19,6 +19,8 @@ static DeviceConfig make_io_in_sram_config()
     c.io_base          = 0x0100;  // IO sits at the start of SRAM
     c.sram_base        = 0x0100;
     c.sram_size_bytes  = 256;
+    c.x_low_reg        = 26;      // standard AVR: R26 = XL, R27 = XH
+    c.x_high_reg       = 27;
     return c;
 }
 
@@ -322,6 +324,482 @@ TEST_CASE("LDI - flags not affected", "[ldi][data_transfer]")
     constexpr u8 sentinel = 0b10110101;
     cpu.set_sreg(sentinel);
     cpu.exec_ldi(encode_ldi(16, 0xFF));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+// ---------------------------------------------------------------------------
+// ST X  (1001 001r rrrr 1100)
+//
+// Stores Rr to the data address held in the X pointer register (r27:r26).
+// Neither the source register nor X is modified.
+// ---------------------------------------------------------------------------
+
+// Encode ST X, Rr
+static u16 encode_st_x(u8 r)
+{
+    return static_cast<u16>(0x920C | ((r & 0x1F) << 4));
+}
+
+// Config with io_base inside SRAM so that any SRAM write is readable.
+// Reuses make_io_in_sram_config(): sram_base = io_base = 0x0100, size = 256.
+// X pointer values in range [0x0100, 0x01FF] are valid.
+
+TEST_CASE("ST X - writes Rr value to memory at X address", "[st_x][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x00); // XL — X = 0x0100
+    cpu.set_reg(27, 0x01); // XH
+    cpu.set_reg(5, 0xAB);
+    cpu.exec_st_x(encode_st_x(5));
+
+    REQUIRE(mem.read8(0x0100) == 0xAB);
+}
+
+TEST_CASE("ST X - writes zero value correctly", "[st_x][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x05); // X = 0x0105
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(2, 0x00);
+    cpu.exec_st_x(encode_st_x(2));
+
+    REQUIRE(mem.read8(0x0105) == 0x00);
+}
+
+TEST_CASE("ST X - writes 0xFF correctly", "[st_x][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x0A); // X = 0x010A
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(3, 0xFF);
+    cpu.exec_st_x(encode_st_x(3));
+
+    REQUIRE(mem.read8(0x010A) == 0xFF);
+}
+
+TEST_CASE("ST X - correct source register selected (R0)", "[st_x][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x00); // X = 0x0100
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(0,  0x11);
+    cpu.set_reg(1,  0x22); // decoy
+    cpu.exec_st_x(encode_st_x(0));
+
+    REQUIRE(mem.read8(0x0100) == 0x11);
+}
+
+TEST_CASE("ST X - correct source register selected (R31)", "[st_x][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x00); // X = 0x0100
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(31, 0xCC);
+    cpu.set_reg(30, 0xFF); // decoy
+    cpu.exec_st_x(encode_st_x(31));
+
+    REQUIRE(mem.read8(0x0100) == 0xCC);
+}
+
+TEST_CASE("ST X - correct source register selected (R10, mid-range)", "[st_x][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x00); // X = 0x0100
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(10, 0x7E);
+    cpu.set_reg(11, 0x3F); // decoy
+    cpu.exec_st_x(encode_st_x(10));
+
+    REQUIRE(mem.read8(0x0100) == 0x7E);
+}
+
+TEST_CASE("ST X - X low byte forms correct target address", "[st_x][data_transfer]")
+{
+    // Vary XL to confirm the low byte steers the write to different addresses.
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x15); // X = 0x0115
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(4, 0xBB);
+    cpu.exec_st_x(encode_st_x(4));
+
+    REQUIRE(mem.read8(0x0115) == 0xBB);
+    REQUIRE(mem.read8(0x0100) == 0x00); // other address untouched
+}
+
+TEST_CASE("ST X - X high byte forms correct target address", "[st_x][data_transfer]")
+{
+    // Both bytes of X must be used: write to 0x0100 and verify 0x0000 is untouched.
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x00); // X = 0x0100  (not 0x0000)
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(6, 0xD3);
+    cpu.exec_st_x(encode_st_x(6));
+
+    REQUIRE(mem.read8(0x0100) == 0xD3);
+}
+
+TEST_CASE("ST X - source register not modified", "[st_x][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x00); // X = 0x0100
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(8, 0x55);
+    cpu.exec_st_x(encode_st_x(8));
+
+    REQUIRE(cpu.reg(8) == 0x55);
+}
+
+TEST_CASE("ST X - X pointer registers not modified", "[st_x][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x0F); // X = 0x010F
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(9, 0x44);
+    cpu.exec_st_x(encode_st_x(9));
+
+    REQUIRE(cpu.reg(26) == 0x0F);
+    REQUIRE(cpu.reg(27) == 0x01);
+}
+
+TEST_CASE("ST X - flags not affected", "[st_x][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    constexpr u8 sentinel = 0b11001010;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(26, 0x00); // X = 0x0100
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(7, 0x12);
+    cpu.exec_st_x(encode_st_x(7));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+// ---------------------------------------------------------------------------
+// ST X+  (1001 001r rrrr 1101)
+//
+// Stores Rr to the address in X, then increments X by 1.
+// Source register and flags are not modified.
+// ---------------------------------------------------------------------------
+
+// Encode ST X+, Rr
+static u16 encode_st_x_post_inc(u8 r)
+{
+    return static_cast<u16>(0x920D | ((r & 0x1F) << 4));
+}
+
+TEST_CASE("ST X+ - writes Rr value to memory at X address", "[st_x_post_inc][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x00); // X = 0x0100
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(5, 0xAB);
+    cpu.exec_st_x_post_inc(encode_st_x_post_inc(5));
+
+    REQUIRE(mem.read8(0x0100) == 0xAB);
+}
+
+TEST_CASE("ST X+ - X is incremented by 1 after store", "[st_x_post_inc][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x00); // X = 0x0100
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(3, 0x55);
+    cpu.exec_st_x_post_inc(encode_st_x_post_inc(3));
+
+    // X must now point to 0x0101
+    REQUIRE(cpu.reg(26) == 0x01); // XL
+    REQUIRE(cpu.reg(27) == 0x01); // XH unchanged
+}
+
+TEST_CASE("ST X+ - write happens before increment (store at original address)", "[st_x_post_inc][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x05); // X = 0x0105
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(4, 0x77);
+    cpu.exec_st_x_post_inc(encode_st_x_post_inc(4));
+
+    REQUIRE(mem.read8(0x0105) == 0x77);   // stored at original X
+    REQUIRE(mem.read8(0x0106) == 0x00);   // incremented address untouched
+}
+
+TEST_CASE("ST X+ - XL wraps and carries into XH on 0xFF->0x00 boundary", "[st_x_post_inc][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    // X = 0x01FF — store here, then X should become 0x0200
+    cpu.set_reg(26, 0xFF); // XL
+    cpu.set_reg(27, 0x01); // XH
+    cpu.set_reg(2, 0x99);
+    cpu.exec_st_x_post_inc(encode_st_x_post_inc(2));
+
+    REQUIRE(mem.read8(0x01FF) == 0x99);
+    REQUIRE(cpu.reg(26) == 0x00); // XL wrapped
+    REQUIRE(cpu.reg(27) == 0x02); // XH carried
+}
+
+TEST_CASE("ST X+ - correct source register selected (R0)", "[st_x_post_inc][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x00); // X = 0x0100
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(0, 0x11);
+    cpu.set_reg(1, 0x22); // decoy
+    cpu.exec_st_x_post_inc(encode_st_x_post_inc(0));
+
+    REQUIRE(mem.read8(0x0100) == 0x11);
+}
+
+TEST_CASE("ST X+ - correct source register selected (R31)", "[st_x_post_inc][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x00); // X = 0x0100
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(31, 0xCC);
+    cpu.set_reg(30, 0xFF); // decoy
+    cpu.exec_st_x_post_inc(encode_st_x_post_inc(31));
+
+    REQUIRE(mem.read8(0x0100) == 0xCC);
+}
+
+TEST_CASE("ST X+ - source register not modified", "[st_x_post_inc][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x00); // X = 0x0100
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(8, 0x55);
+    cpu.exec_st_x_post_inc(encode_st_x_post_inc(8));
+
+    REQUIRE(cpu.reg(8) == 0x55);
+}
+
+TEST_CASE("ST X+ - flags not affected", "[st_x_post_inc][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    constexpr u8 sentinel = 0b10100101;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(26, 0x00); // X = 0x0100
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(6, 0x34);
+    cpu.exec_st_x_post_inc(encode_st_x_post_inc(6));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+// ---------------------------------------------------------------------------
+// ST -X  (1001 001r rrrr 1110)
+//
+// Decrements X by 1, then stores Rr to the new X address.
+// Source register and flags are not modified.
+// ---------------------------------------------------------------------------
+
+// Encode ST -X, Rr
+static u16 encode_st_x_pre_dec(u8 r)
+{
+    return static_cast<u16>(0x920E | ((r & 0x1F) << 4));
+}
+
+TEST_CASE("ST -X - writes Rr value to memory at decremented X address", "[st_x_pre_dec][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x01); // X = 0x0101  →  pre-dec → store at 0x0100
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(5, 0xAB);
+    cpu.exec_st_x_pre_dec(encode_st_x_pre_dec(5));
+
+    REQUIRE(mem.read8(0x0100) == 0xAB);
+}
+
+TEST_CASE("ST -X - X is decremented by 1 before store", "[st_x_pre_dec][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x05); // X = 0x0105  →  pre-dec → X = 0x0104
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(3, 0x55);
+    cpu.exec_st_x_pre_dec(encode_st_x_pre_dec(3));
+
+    REQUIRE(cpu.reg(26) == 0x04); // XL decremented
+    REQUIRE(cpu.reg(27) == 0x01); // XH unchanged
+}
+
+TEST_CASE("ST -X - decrement happens before write (store at X-1, not original X)", "[st_x_pre_dec][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x0A); // X = 0x010A  →  pre-dec → store at 0x0109
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(4, 0x77);
+    cpu.exec_st_x_pre_dec(encode_st_x_pre_dec(4));
+
+    REQUIRE(mem.read8(0x0109) == 0x77);  // stored at decremented address
+    REQUIRE(mem.read8(0x010A) == 0x00);  // original address untouched
+}
+
+TEST_CASE("ST -X - XL borrows from XH on 0x00->0xFF boundary", "[st_x_pre_dec][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    // X = 0x0200  →  pre-dec → store at 0x01FF
+    cpu.set_reg(26, 0x00); // XL
+    cpu.set_reg(27, 0x02); // XH
+    cpu.set_reg(2, 0x99);
+    cpu.exec_st_x_pre_dec(encode_st_x_pre_dec(2));
+
+    REQUIRE(mem.read8(0x01FF) == 0x99);
+    REQUIRE(cpu.reg(26) == 0xFF); // XL borrowed
+    REQUIRE(cpu.reg(27) == 0x01); // XH decremented
+}
+
+TEST_CASE("ST -X - correct source register selected (R0)", "[st_x_pre_dec][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x01); // X = 0x0101 → store at 0x0100
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(0, 0x11);
+    cpu.set_reg(1, 0x22); // decoy
+    cpu.exec_st_x_pre_dec(encode_st_x_pre_dec(0));
+
+    REQUIRE(mem.read8(0x0100) == 0x11);
+}
+
+TEST_CASE("ST -X - correct source register selected (R31)", "[st_x_pre_dec][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x01); // X = 0x0101 → store at 0x0100
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(31, 0xCC);
+    cpu.set_reg(30, 0xFF); // decoy
+    cpu.exec_st_x_pre_dec(encode_st_x_pre_dec(31));
+
+    REQUIRE(mem.read8(0x0100) == 0xCC);
+}
+
+TEST_CASE("ST -X - source register not modified", "[st_x_pre_dec][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(26, 0x01); // X = 0x0101 → store at 0x0100
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(8, 0x55);
+    cpu.exec_st_x_pre_dec(encode_st_x_pre_dec(8));
+
+    REQUIRE(cpu.reg(8) == 0x55);
+}
+
+TEST_CASE("ST -X - flags not affected", "[st_x_pre_dec][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    constexpr u8 sentinel = 0b01011010;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(26, 0x01); // X = 0x0101 → store at 0x0100
+    cpu.set_reg(27, 0x01);
+    cpu.set_reg(7, 0x12);
+    cpu.exec_st_x_pre_dec(encode_st_x_pre_dec(7));
 
     REQUIRE(cpu.sreg() == sentinel);
 }

@@ -32,6 +32,9 @@ struct DeviceConfig {
   u16 sram_base = 0x0100;       // common for many ATmega
   u16 sram_size_bytes = 0;
 
+  u16 x_low_reg = 0;       // if X pointer registers are memory-mapped
+  u16 x_high_reg = 0;      // (0 if X is not
+
   // Special register addresses in DATA space
   u16 sreg_data_addr = 0;
   u16 spl_data_addr = 0;        // stack pointer low

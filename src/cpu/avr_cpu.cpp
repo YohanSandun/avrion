@@ -50,4 +50,15 @@ namespace avrion
         return desc->cycles;
     }
 
+    u16 AvrCpu::x() const
+    {
+        return (static_cast<u16>(reg(cfg_.x_high_reg)) << 8) | reg(cfg_.x_low_reg);
+    }
+
+    void AvrCpu::set_x(u16 v)
+    {
+        set_reg(cfg_.x_low_reg, v & 0xFF);
+        set_reg(cfg_.x_high_reg, (v >> 8) & 0xFF);
+    }
+
 } // namespace avrion

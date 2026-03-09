@@ -35,6 +35,10 @@ namespace avrion
             c.spl_data_addr = 0x005D;
             c.sph_data_addr = 0x005E;
 
+            // XL = R26, XH = R27
+            c.x_low_reg = 26;  
+            c.x_high_reg = 27;
+
             c.reset_vector_flash_addr = 0x0000;
 
             // GPIO port regions — data-space addresses (IO offset + 0x20)

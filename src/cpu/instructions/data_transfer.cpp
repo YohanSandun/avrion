@@ -19,4 +19,29 @@ void AvrCpu::exec_ldi(u16 opcode) {
     set_reg(d, K);
 }
 
+void AvrCpu::exec_st_x(u16 opcode) {
+    // ST X
+    // 1001 001r rrrr 1100
+    u8 r = reg((opcode & 0x01F0) >> 4);
+    mem_.write8(x(), r);
+}
+
+void AvrCpu::exec_st_x_post_inc(u16 opcode) {
+    // ST X+
+    // 1001 001r rrrr 1101
+    u8 r = reg((opcode & 0x01F0) >> 4);
+    u16 addr = x();
+    mem_.write8(addr, r);
+    set_x(addr + 1);
+}
+
+void AvrCpu::exec_st_x_pre_dec(u16 opcode) {
+    // ST -X
+    // 1001 001r rrrr 1110
+    u8 r = reg((opcode & 0x01F0) >> 4);
+    u16 addr = x() - 1;
+    set_x(addr);
+    mem_.write8(addr, r);
+}
+
 } // namespace avrion

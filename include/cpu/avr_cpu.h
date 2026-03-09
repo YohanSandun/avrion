@@ -16,8 +16,8 @@ public:
 
   // CpuSnapshot snapshot() const;
 
-  u8  reg(u8 i) const { return st_.r[i & 31]; }
-  void set_reg(u8 i, u8 v) { st_.r[i & 31] = v; }
+  u8  reg(u8 i) const { return st_.r[i]; }
+  void set_reg(u8 i, u8 v) { st_.r[i] = v; }
 
   u8  sreg() const { return st_.sreg; }
   void set_sreg(u8 v) { st_.sreg = v; }
@@ -27,6 +27,9 @@ public:
 
   u16 sp() const { return st_.sp; }
   void set_sp(u16 v) { st_.sp = v; }
+
+  u16 x() const;
+  void set_x(u16 v);
 
   // Misc
   void exec_nop(u16 opcode);
@@ -39,6 +42,9 @@ public:
   // Data transfer
   void exec_out(u16 opcode);
   void exec_ldi(u16 opcode);
+  void exec_st_x(u16 opcode);
+  void exec_st_x_post_inc(u16 opcode);
+  void exec_st_x_pre_dec(u16 opcode);
 
   // Branching
   void exec_jmp(u16 opcode);

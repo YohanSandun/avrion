@@ -1634,7 +1634,138 @@ TEST_CASE("LPM - correct flash byte address used (Z low byte)", "[lpm][data_tran
     cpu.set_z(0x0031);
     cpu.exec_lpm(0x95C8);
 
-    REQUIRE(cpu.reg(0) == 0x22);
+    REQUIRE(cpu.reg(0) == 0x22u);
+}
+
+// ---------------------------------------------------------------------------
+// PUSH  (1001 001d dddd 1111)
+//
+// Decrements SP by 1, then writes Rd to the new top of stack.
+// SP_after = SP_before - 1
+// mem[SP_after] = Rd
+// Cycles: 1 (note: real AVR is 2, but this codebase returns 1; see impl)
+// Flags: none affected
+//
+// Config: make_sreg_config() has sram_size=2*1024, sram_base=0x0100.
+// Default SP = sram_size - 1 = 2047 = 0x07FF.
+// ---------------------------------------------------------------------------
+
+static constexpr u16 PUSH_INITIAL_SP = 0x07FFu; // sram_size_bytes(2048) - 1
+
+static u16 encode_push(u8 d)
+{
+    // 1001 001d dddd 1111
+    return static_cast<u16>(0x920F | ((d & 0x1F) << 4));
+}
+
+TEST_CASE("PUSH - register value written to stack", "[push][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(5, 0xAB);
+    cpu.exec_push(encode_push(5));
+
+    REQUIRE(mem.read8(PUSH_INITIAL_SP - 1) == 0xABu);
+}
+
+TEST_CASE("PUSH - SP decremented by 1", "[push][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(10, 0x00);
+    cpu.exec_push(encode_push(10));
+
+    REQUIRE(cpu.sp() == PUSH_INITIAL_SP - 1);
+}
+
+TEST_CASE("PUSH - zero value pushed correctly", "[push][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    // R0 is already 0 after reset
+    cpu.exec_push(encode_push(0));
+
+    REQUIRE(mem.read8(PUSH_INITIAL_SP - 1) == 0x00u);
+}
+
+TEST_CASE("PUSH - 0xFF value pushed correctly", "[push][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(16, 0xFF);
+    cpu.exec_push(encode_push(16));
+
+    REQUIRE(mem.read8(PUSH_INITIAL_SP - 1) == 0xFFu);
+}
+
+TEST_CASE("PUSH - upper register (R31) pushed correctly", "[push][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(31, 0x77);
+    cpu.exec_push(encode_push(31));
+
+    REQUIRE(mem.read8(PUSH_INITIAL_SP - 1) == 0x77u);
+}
+
+TEST_CASE("PUSH - source register unchanged after push", "[push][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(8, 0x55);
+    cpu.exec_push(encode_push(8));
+
+    REQUIRE(cpu.reg(8) == 0x55u);
+}
+
+TEST_CASE("PUSH - two consecutive pushes stack in LIFO order", "[push][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(0, 0x11);
+    cpu.set_reg(1, 0x22);
+    cpu.exec_push(encode_push(0)); // pushed first, ends up deeper
+    cpu.exec_push(encode_push(1)); // pushed second, at top
+
+    REQUIRE(mem.read8(PUSH_INITIAL_SP - 1) == 0x11u); // R0 deeper
+    REQUIRE(mem.read8(PUSH_INITIAL_SP - 2) == 0x22u); // R1 on top
+    REQUIRE(cpu.sp() == PUSH_INITIAL_SP - 2);
+}
+
+TEST_CASE("PUSH - flags unaffected", "[push][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    constexpr u8 sentinel = 0b10110101;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(3, 0x42);
+    cpu.exec_push(encode_push(3));
+
+    REQUIRE(cpu.sreg() == sentinel);
 }
 
 TEST_CASE("LPM - Z is not modified", "[lpm][data_transfer]")

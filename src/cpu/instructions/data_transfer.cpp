@@ -143,4 +143,13 @@ u8 AvrCpu::exec_ld_x_pre_dec(u16 opcode) {
     return 2;
 }
 
+
+u8 AvrCpu::exec_push(u16 opcode) {
+    // PUSH
+    // 1001 001d dddd 1111
+    u8 d = (opcode & 0x01F0) >> 4;
+    mem_.write8(--st_.sp, reg(d));
+    return 1;
+}
+
 } // namespace avrion

@@ -67,6 +67,7 @@ public:
   u8 exec_ld_x(u16 opcode);
   u8 exec_ld_x_post_inc(u16 opcode);
   u8 exec_ld_x_pre_dec(u16 opcode);
+  u8 exec_push(u16 opcode);
 
   // Branching
   u8 exec_jmp(u16 opcode);

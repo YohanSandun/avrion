@@ -168,4 +168,30 @@ u8 AvrCpu::exec_adc(u16 opcode) {
     return 1;
 }
 
+u8 AvrCpu::exec_subi(u16 opcode) {
+    // SUBI
+    // 0101 KKKK dddd KKKK
+    u8 d = 16 + ((opcode >> 4) & 0xF);
+    u8 k = (opcode & 0x000F) | ((opcode >> 4) & 0xF0);
+    u8 rd = reg(d);
+    u8 result = rd - k;
+    set_reg(d, result);
+
+    u8 rd7 = (rd >> 7) & 1;
+    u8 k7 = (k >> 7) & 1;
+    u8 r7 = (result >> 7) & 1;
+
+    u8 _sreg = sreg();
+    _sreg = (_sreg & ~1u) | (((~rd7 & k7) | (k7 & r7) | (r7 & ~rd7)) & 1); // C flag
+    _sreg = result == 0
+        ? (_sreg | 0x02) : (_sreg & ~0x02u); // Z set if result is zero
+    _sreg = (result & 0x80) != 0
+        ? (_sreg | 0x04) : (_sreg & ~0x04); // N set if bit 7 of result is set
+    _sreg = (_sreg & ~0x08u) | ((((rd7 & ~k7 & ~r7) | (~rd7 & k7 & r7)) & 1) << 3) ; // V flag
+    _sreg |= (((_sreg & 0x04) >> 2) ^ ((_sreg & 0x08) >> 3)) << 4; // S = N XOR V
+    _sreg = (_sreg & ~0x20u) | ((((~(rd & 0x8) & (k & 0x8)) | ((k & 0x8) & (result & 0x8)) | ((result & 0x8) & ~(rd & 0x8))) & 0x8) << 2); // H flag
+    set_sreg(_sreg);
+    return 1;
+}
+
 } // namespace avrion

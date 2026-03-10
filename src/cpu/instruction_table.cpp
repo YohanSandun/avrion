@@ -4,7 +4,7 @@
 
 namespace avrion {
 
-static const std::array<InstructionDesc, 26> kInstructionTable = {{
+static const std::array<InstructionDesc, 27> kInstructionTable = {{
     // mask  pattern name
     // misc
     {0xFFFF, 0x0000, "NOP",    &AvrCpu::exec_nop},
@@ -32,6 +32,7 @@ static const std::array<InstructionDesc, 26> kInstructionTable = {{
     {0xFC00, 0x2000, "AND",    &AvrCpu::exec_and},
     {0xFC00, 0x0C00, "ADD",    &AvrCpu::exec_add},
     {0xFC00, 0x1C00, "ADC",    &AvrCpu::exec_adc},
+    {0xF000, 0x5000, "SUBI",   &AvrCpu::exec_subi},
 
     // branch
     {0xFE0E, 0x940C, "JMP",    &AvrCpu::exec_jmp},

@@ -1797,3 +1797,86 @@ TEST_CASE("CPC - Rd == Rr (same register, no carry-in)", "[cpc][alu]")
     REQUIRE((cpu.sreg() & SREG_Z) != 0);
     REQUIRE((cpu.sreg() & SREG_C) == 0);
 }
+
+// ---------------------------------------------------------------------------
+// SUBI (0101 KKKK dddd KKKK)
+//
+// Operation : Rd ← Rd - K
+// Operands  : Rd ∈ R16–R31, K ∈ 0–255
+// Flags     : C, Z, N, V, S (N XOR V), H
+// ---------------------------------------------------------------------------
+
+// Encode SUBI Rd, K
+static u16 encode_subi(u8 d, u8 k)
+{
+    u8 d_off = d - 16;
+    return static_cast<u16>(0x5000
+        | ((k & 0xF0) << 4)
+        | ((d_off & 0x0F) << 4)
+        | (k & 0x0F));
+}
+
+TEST_CASE("SUBI - basic subtraction stores result and preserves other regs", "[subi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(16, 0x20);
+    cpu.set_reg(17, 0x99); // decoy
+
+    cpu.exec_subi(encode_subi(16, 0x05)); // 0x20 - 0x05 = 0x1B
+
+    REQUIRE(cpu.reg(16) == 0x1B);
+    REQUIRE(cpu.reg(17) == 0x99);
+}
+
+TEST_CASE("SUBI - zero result sets Z flag", "[subi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(18, 0x05);
+    cpu.set_sreg(0x00);
+
+    cpu.exec_subi(encode_subi(18, 0x05));
+
+    REQUIRE(cpu.reg(18) == 0x00);
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+}
+
+TEST_CASE("SUBI - borrow sets C and negative sets N", "[subi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(19, 0x00);
+    cpu.set_sreg(0x00);
+
+    cpu.exec_subi(encode_subi(19, 0x01)); // 0x00 - 0x01 = 0xFF
+
+    REQUIRE(cpu.reg(19) == 0xFF);
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+    REQUIRE((cpu.sreg() & SREG_Z) == 0);
+}
+
+TEST_CASE("SUBI - signed overflow sets V and S accordingly", "[subi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    // 0x80 - 0x01 = 0x7F -> signed overflow (negative - positive -> positive)
+    cpu.set_reg(20, 0x80);
+    cpu.set_sreg(0x00);
+
+    cpu.exec_subi(encode_subi(20, 0x01));
+
+    REQUIRE(cpu.reg(20) == 0x7F);
+    REQUIRE((cpu.sreg() & SREG_V) != 0);
+    REQUIRE((cpu.sreg() & SREG_N) == 0);
+    REQUIRE((cpu.sreg() & SREG_S) != 0); // S = N XOR V -> 1
+}

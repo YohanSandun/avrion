@@ -481,6 +481,217 @@ TEST_CASE("AND - H flag not affected", "[and][alu]")
 }
 
 // ---------------------------------------------------------------------------
+// OR  (0010 10rd dddd rrrr)
+//
+// Operation : Rd ← Rd | Rr
+// Flags     : Z = (result == 0), N = result[7], V = 0, S = N
+// ---------------------------------------------------------------------------
+
+// Encode OR Rd, Rr opcode from register indices.
+static u16 encode_or(u8 d, u8 r)
+{
+    return static_cast<u16>(0x2800
+        | ((d & 0x1F) << 4)
+        | ((r & 0x10) << 5)
+        | (r & 0x0F));
+}
+
+TEST_CASE("OR - basic OR of two values", "[or][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(1, 0xAA);
+    cpu.set_reg(2, 0x55);
+    cpu.exec_or(encode_or(1, 2));
+
+    REQUIRE(cpu.reg(1) == 0xFF);
+    REQUIRE(cpu.reg(2) == 0x55); // source register unchanged
+}
+
+TEST_CASE("OR - result stored in Rd, Rr unchanged", "[or][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(5, 0x0F);
+    cpu.set_reg(6, 0xF0);
+    cpu.exec_or(encode_or(5, 6));
+
+    REQUIRE(cpu.reg(5) == 0xFF);
+    REQUIRE(cpu.reg(6) == 0xF0);
+}
+
+TEST_CASE("OR - self-OR preserves register (no change)", "[or][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(3, 0xAB);
+    cpu.exec_or(encode_or(3, 3));
+
+    REQUIRE(cpu.reg(3) == 0xAB);
+}
+
+TEST_CASE("OR - works with upper registers R16-R31", "[or][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0b10110011);
+    cpu.set_reg(17, 0b01001100);
+    cpu.exec_or(encode_or(16, 17));
+
+    REQUIRE(cpu.reg(16) == 0b11111111);
+}
+
+TEST_CASE("OR - Z set when result is zero", "[or][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(0, 0x00);
+    cpu.set_reg(1, 0x00);
+    cpu.exec_or(encode_or(0, 1));
+
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+}
+
+TEST_CASE("OR - Z cleared when result is non-zero", "[or][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // pre-set Z
+    cpu.set_reg(0, 0xAA);
+    cpu.set_reg(1, 0x55);
+    cpu.exec_or(encode_or(0, 1));
+
+    REQUIRE((cpu.sreg() & SREG_Z) == 0);
+}
+
+TEST_CASE("OR - N set when bit 7 of result is set", "[or][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(0, 0xAA); // 0xAA | 0x55 = 0xFF  (bit 7 set)
+    cpu.set_reg(1, 0x55);
+    cpu.exec_or(encode_or(0, 1));
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+}
+
+TEST_CASE("OR - N cleared when bit 7 of result is clear", "[or][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // pre-set N
+    cpu.set_reg(0, 0x0F);
+    cpu.set_reg(1, 0x01); // 0x0F | 0x01 = 0x0F  (bit 7 clear)
+    cpu.exec_or(encode_or(0, 1));
+
+    REQUIRE((cpu.sreg() & SREG_N) == 0);
+}
+
+TEST_CASE("OR - V always cleared", "[or][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // pre-set V
+    cpu.set_reg(0, 0xAA);
+    cpu.set_reg(1, 0x55);
+    cpu.exec_or(encode_or(0, 1));
+
+    REQUIRE((cpu.sreg() & SREG_V) == 0);
+}
+
+TEST_CASE("OR - S equals N when result is negative", "[or][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(0, 0xAA); // result = 0xFF, N=1 → S=1
+    cpu.set_reg(1, 0x55);
+    cpu.exec_or(encode_or(0, 1));
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+    REQUIRE((cpu.sreg() & SREG_S) != 0);
+}
+
+TEST_CASE("OR - S cleared when result is positive", "[or][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // pre-set S
+    cpu.set_reg(0, 0x0F); // result = 0x0F, N=0 → S=0
+    cpu.set_reg(1, 0x01);
+    cpu.exec_or(encode_or(0, 1));
+
+    REQUIRE((cpu.sreg() & SREG_S) == 0);
+}
+
+TEST_CASE("OR - C flag not affected", "[or][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // C set before OR — must remain set
+    cpu.set_sreg(SREG_C);
+    cpu.set_reg(0, 0x0F);
+    cpu.set_reg(1, 0x01);
+    cpu.exec_or(encode_or(0, 1));
+
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+
+    // C clear before OR — must remain clear
+    cpu.set_sreg(0x00);
+    cpu.set_reg(0, 0x0F);
+    cpu.set_reg(1, 0x01);
+    cpu.exec_or(encode_or(0, 1));
+
+    REQUIRE((cpu.sreg() & SREG_C) == 0);
+}
+
+TEST_CASE("OR - H flag not affected", "[or][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // H set before OR — must remain set
+    cpu.set_sreg(SREG_H);
+    cpu.set_reg(0, 0x0F);
+    cpu.set_reg(1, 0x01);
+    cpu.exec_or(encode_or(0, 1));
+
+    REQUIRE((cpu.sreg() & SREG_H) != 0);
+
+    // H clear before OR — must remain clear
+    cpu.set_sreg(0x00);
+    cpu.set_reg(0, 0x0F);
+    cpu.set_reg(1, 0x01);
+    cpu.exec_or(encode_or(0, 1));
+
+    REQUIRE((cpu.sreg() & SREG_H) == 0);
+}
+
+// ---------------------------------------------------------------------------
 // ADD  (0000 11rd dddd rrrr)
 //
 // Operation : Rd ← Rd + Rr

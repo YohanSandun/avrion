@@ -2163,3 +2163,75 @@ TEST_CASE("MOVW - copies pair at lower registers (R0..R1 -> R8..R9)", "[movw][da
     REQUIRE(cpu.reg(7) == 0x00);
     REQUIRE(cpu.reg(10) == 0x00);
 }
+
+// ---------------------------------------------------------------------------
+// MOV  (0010 11rd dddd rrrr)
+//
+// Copies Rr into Rd. Flags not affected.
+// ---------------------------------------------------------------------------
+
+// Encode MOV Rd, Rr
+static u16 encode_mov(u8 d, u8 r)
+{
+    return static_cast<u16>(0x2C00
+        | ((r & 0x10) << 5)   // r[4] -> bit 9
+        | ((d & 0x1F) << 4)   // d[4:0] -> bits [8:4]
+        | (r & 0x0F));        // r[3:0] -> bits [3:0]
+}
+
+TEST_CASE("MOV - copies Rr to Rd (low registers)", "[mov][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(2, 0xAB);
+    cpu.set_reg(3, 0xFF); // decoy
+    cpu.exec_mov(encode_mov(1, 2)); // MOV R1, R2
+
+    REQUIRE(cpu.reg(1) == 0xAB);
+    REQUIRE(cpu.reg(2) == 0xAB); // source unchanged
+    REQUIRE(cpu.reg(3) == 0xFF); // decoy unchanged
+}
+
+TEST_CASE("MOV - copies Rr to Rd (high registers)", "[mov][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(21, 0xCD);
+    cpu.exec_mov(encode_mov(30, 21)); // MOV R30, R21
+
+    REQUIRE(cpu.reg(30) == 0xCD);
+    REQUIRE(cpu.reg(21) == 0xCD); // source unchanged
+}
+
+TEST_CASE("MOV - self-move leaves register unchanged", "[mov][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(5, 0x77);
+    cpu.exec_mov(encode_mov(5, 5)); // MOV R5, R5
+
+    REQUIRE(cpu.reg(5) == 0x77);
+}
+
+TEST_CASE("MOV - only destination modified, adjacent registers unchanged", "[mov][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(9, 0x11);  // source
+    cpu.set_reg(10, 0x00); // destination initially zero
+    cpu.set_reg(11, 0x22); // decoy above
+
+    cpu.exec_mov(encode_mov(10, 9)); // MOV R10, R9
+
+    REQUIRE(cpu.reg(10) == 0x11);
+    REQUIRE(cpu.reg(9)  == 0x11); // source unchanged
+    REQUIRE(cpu.reg(11) == 0x22); // adjacent unchanged
+}

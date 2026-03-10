@@ -860,11 +860,9 @@ TEST_CASE("CPSE - flags unaffected when not equal", "[cpse]")
 // ---------------------------------------------------------------------------
 // SBIS  (1001 1011 AAAA Abbb)
 //
-// Skip next instruction if bit b in IO register A is set. Implementation
-// under test uses SREG bit `b` as the guard. If the bit is 0: no skip (1
-// cycle). If bit is 1: skip next instruction; PC += 2 for single-word
-// next instruction, or +=4 for two-word next instruction. Cycles: 1/2/3.
-// Flags: none affected.
+// Skip next instruction if bit b in IO register A is set. Tests map IO into
+// SRAM by setting `cfg.io_base = cfg.sram_base` so we can write/read bytes
+// directly with MemoryMap::write8/read8.
 // ---------------------------------------------------------------------------
 
 static u16 encode_sbis(u8 A, u8 b)
@@ -872,14 +870,16 @@ static u16 encode_sbis(u8 A, u8 b)
     return static_cast<u16>(0x9B00 | ((A & 0x1F) << 3) | (b & 0x07));
 }
 
-TEST_CASE("SBIS - bit clear: no skip, 1 cycle", "[sbis]")
+TEST_CASE("SBIS - IO bit clear: no skip, 1 cycle", "[sbis]")
 {
     auto cfg = make_test_config();
+    cfg.io_base = cfg.sram_base; // map IO into SRAM for tests
     MemoryMap mem{cfg};
     AvrCpu    cpu{mem, cfg};
     mem.attach_cpu(&cpu);
 
-    cpu.set_sreg(0x00); // bit cleared
+    // IO A=0, bit b=2 cleared
+    mem.write8(cfg.io_base + 0, 0x00);
     cpu.set_pc(50);
     flash_write16(mem.flash(), 50, 0x0000); // single-word next
 
@@ -889,14 +889,16 @@ TEST_CASE("SBIS - bit clear: no skip, 1 cycle", "[sbis]")
     REQUIRE(cycles == 1);
 }
 
-TEST_CASE("SBIS - bit set: skip single-word next, PC += 2, 2 cycles", "[sbis]")
+TEST_CASE("SBIS - IO bit set: skip single-word next, PC += 2, 2 cycles", "[sbis]")
 {
     auto cfg = make_test_config();
+    cfg.io_base = cfg.sram_base;
     MemoryMap mem{cfg};
     AvrCpu    cpu{mem, cfg};
     mem.attach_cpu(&cpu);
 
-    cpu.set_sreg(0x04); // bit 2 set
+    // IO A=1, set bit 2
+    mem.write8(cfg.io_base + 1, 0x04);
     cpu.set_pc(60);
     flash_write16(mem.flash(), 60, 0x0000); // NOP — single-word
 
@@ -906,14 +908,16 @@ TEST_CASE("SBIS - bit set: skip single-word next, PC += 2, 2 cycles", "[sbis]")
     REQUIRE(cycles == 2);
 }
 
-TEST_CASE("SBIS - bit set: skip two-word next, PC += 4, 3 cycles", "[sbis]")
+TEST_CASE("SBIS - IO bit set: skip two-word next, PC += 4, 3 cycles", "[sbis]")
 {
     auto cfg = make_test_config();
+    cfg.io_base = cfg.sram_base;
     MemoryMap mem{cfg};
     AvrCpu    cpu{mem, cfg};
     mem.attach_cpu(&cpu);
 
-    cpu.set_sreg(0x01); // bit 0 set
+    // IO A=2, set bit 0
+    mem.write8(cfg.io_base + 2, 0x01);
     cpu.set_pc(70);
     flash_write16(mem.flash(), 70, 0x940C); // JMP — two-word
 
@@ -923,21 +927,24 @@ TEST_CASE("SBIS - bit set: skip two-word next, PC += 4, 3 cycles", "[sbis]")
     REQUIRE(cycles == 3);
 }
 
-TEST_CASE("SBIS - flags unaffected", "[sbis]")
+TEST_CASE("SBIS - flags unaffected (IO-based check)", "[sbis]")
 {
     auto cfg = make_test_config();
+    cfg.io_base = cfg.sram_base;
     MemoryMap mem{cfg};
     AvrCpu    cpu{mem, cfg};
     mem.attach_cpu(&cpu);
 
     constexpr u8 sentinel = 0b10101010;
-    cpu.set_sreg(sentinel | 0x02); // ensure tested bit may be set
+    cpu.set_sreg(sentinel);
+    // IO A=0, set bit 1
+    mem.write8(cfg.io_base + 0, 0x02);
     cpu.set_pc(80);
     flash_write16(mem.flash(), 80, 0x0000);
 
     cpu.exec_sbis(encode_sbis(0, 1));
 
-    REQUIRE(cpu.sreg() == (sentinel | 0x02));
+    REQUIRE(cpu.sreg() == sentinel);
 }
 
 // ---------------------------------------------------------------------------

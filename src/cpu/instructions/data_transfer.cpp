@@ -143,12 +143,21 @@ u8 AvrCpu::exec_ld_x_pre_dec(u16 opcode) {
     return 2;
 }
 
-
 u8 AvrCpu::exec_push(u16 opcode) {
     // PUSH
     // 1001 001d dddd 1111
     u8 d = (opcode & 0x01F0) >> 4;
     mem_.write8(--st_.sp, reg(d));
+    return 1;
+}
+
+u8 AvrCpu::exec_mov(u16 opcode) {
+    // MOV
+    // 0010 11rd dddd rrrr
+    u8 d = (opcode >> 4) & 0x1F;
+    u8 r = (opcode & 0x000F) | ((opcode >> 5) & 0x10);
+
+    set_reg(d, reg(r));
     return 1;
 }
 

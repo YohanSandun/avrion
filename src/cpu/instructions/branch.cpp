@@ -107,7 +107,7 @@ u8 AvrCpu::exec_sbis(u16 opcode) {
     u8 A = (opcode >> 3) & 0x1F;
     u8 b = opcode & 0x07;
 
-    if (!(sreg() & (1 << b))) { 
+    if (!(mem_.read8(cfg_.io_base + A) & (1 << b))) { 
         return 1;
     }
 

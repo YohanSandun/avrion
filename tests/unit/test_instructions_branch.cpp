@@ -397,7 +397,7 @@ TEST_CASE("BRNE - only Z bit matters: other flags set but Z=0 still branches", "
 // ---------------------------------------------------------------------------
 // CALL  (1001 010k kkkk 111k  +  kkkk kkkk kkkk kkkk)
 //
-// Pushes ret = pc() + 4 onto the stack (low byte first, then high byte),
+// Pushes ret = pc() + 2 onto the stack (low byte first, then high byte),
 // then jumps to byte address k << 1.
 // For 22-bit PC devices an extra upper byte is also pushed.
 // Stack layout after a 16-bit-PC push:
@@ -475,14 +475,14 @@ TEST_CASE("CALL - return address low byte pushed to stack", "[call]")
     AvrCpu    cpu{mem, cfg};
     mem.attach_cpu(&cpu);
 
-    // PC = 0x0100 → ret = pc() + 4 = 0x0104.
-    // Low byte = 0x04 lands at INITIAL_SP - 2 (lo is at the lowest stack address).
+    // PC = 0x0100 → ret = pc() + 2 = 0x0102.
+    // Low byte = 0x02 lands at INITIAL_SP - 2 (lo is at the lowest stack address).
     cpu.set_pc(0x0100);
     flash_write16(mem.flash(), 0x0100, 0x0001); // target word — value doesn't matter here
 
     cpu.exec_call(encode_call(0));
 
-    REQUIRE(mem.read8(INITIAL_SP - 2) == 0x04u);
+    REQUIRE(mem.read8(INITIAL_SP - 2) == 0x02u);
 }
 
 TEST_CASE("CALL - return address high byte pushed to stack", "[call]")
@@ -492,7 +492,7 @@ TEST_CASE("CALL - return address high byte pushed to stack", "[call]")
     AvrCpu    cpu{mem, cfg};
     mem.attach_cpu(&cpu);
 
-    // PC = 0x0100 → ret = 0x0104. High byte = 0x01 should land at initial SP - 1.
+    // PC = 0x0100 → ret = 0x0102. High byte = 0x01 should land at initial SP - 1.
     cpu.set_pc(0x0100);
     flash_write16(mem.flash(), 0x0100, 0x0001);
 
@@ -518,7 +518,7 @@ TEST_CASE("CALL - SP decremented by 2 after 16-bit-PC push", "[call]")
 
 TEST_CASE("CALL - return address uses pc() at call time, not original instruction address", "[call]")
 {
-    // With PC = 0x0200 at call time, ret = 0x0204 (pc() + 4).
+    // With PC = 0x0200 at call time, ret = 0x0202 (pc() + 2).
     auto cfg = make_test_config();
     MemoryMap mem{cfg};
     AvrCpu    cpu{mem, cfg};
@@ -529,8 +529,8 @@ TEST_CASE("CALL - return address uses pc() at call time, not original instructio
 
     cpu.exec_call(encode_call(0));
 
-    // lo = 0x04 at INITIAL_SP-2, hi = 0x02 at INITIAL_SP-1
-    REQUIRE(mem.read8(INITIAL_SP - 2) == 0x04u);
+    // lo = 0x02 at INITIAL_SP-2, hi = 0x02 at INITIAL_SP-1
+    REQUIRE(mem.read8(INITIAL_SP - 2) == 0x02u);
     REQUIRE(mem.read8(INITIAL_SP - 1) == 0x02u);
 }
 
@@ -601,9 +601,9 @@ TEST_CASE("CALL - second word is read relative to PC at call time", "[call]")
 
 TEST_CASE("CALL - 22-bit PC: upper ret byte pushed to stack", "[call][22bit]")
 {
-    // PC = 0x0100 → ret = 0x0104. With 22-bit PC, all 3 bytes are pushed
+    // PC = 0x0100 → ret = 0x0102. With 22-bit PC, all 3 bytes are pushed
     // little-endian (lo at lowest address):
-    //   [INITIAL_SP - 3] = ret_lo  (0x04)  ← SP points here
+    //   [INITIAL_SP - 3] = ret_lo  (0x02)  ← SP points here
     //   [INITIAL_SP - 2] = ret_hi  (0x01)
     //   [INITIAL_SP - 1] = ret upper (0x00)
     auto cfg = make_22bit_pc_config();
@@ -616,7 +616,7 @@ TEST_CASE("CALL - 22-bit PC: upper ret byte pushed to stack", "[call][22bit]")
 
     cpu.exec_call(encode_call(0));
 
-    REQUIRE(mem.read8(INITIAL_SP - 3) == 0x04u); // ret_lo
+    REQUIRE(mem.read8(INITIAL_SP - 3) == 0x02u); // ret_lo
     REQUIRE(mem.read8(INITIAL_SP - 2) == 0x01u); // ret_hi
     REQUIRE(mem.read8(INITIAL_SP - 1) == 0x00u); // ret upper
 }
@@ -1030,7 +1030,8 @@ TEST_CASE("RET - PC not affected by old register values", "[ret]")
 // CALL + RET round-trip
 //
 // After CALL, exec_ret must restore PC to the instruction following CALL
-// (return address = pc_before_call + 4, the size of a 4-byte CALL encoding).
+// (return address = pc_before_call + 2, since PC is advanced past only the
+// first CALL word before exec fires; the second word is consumed internally).
 // SP must be fully restored to its value before CALL.
 // ---------------------------------------------------------------------------
 
@@ -1046,11 +1047,11 @@ TEST_CASE("CALL+RET round-trip: PC restored to return address", "[call][ret]")
     flash_write16(mem.flash(), 0x0200, 0x0000); // target word = 0
 
     cpu.exec_call(encode_call(0));
-    // Return address = 0x0200 + 4 = 0x0204
+    // Return address = 0x0200 + 2 = 0x0202
 
     cpu.exec_ret(0x9508);
 
-    REQUIRE(cpu.pc() == 0x0204u);
+    REQUIRE(cpu.pc() == 0x0202u);
 }
 
 TEST_CASE("CALL+RET round-trip: SP restored to initial value", "[call][ret]")

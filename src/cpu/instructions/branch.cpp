@@ -1,6 +1,7 @@
 #include "cpu/avr_cpu.h"
 #include "cpu/decoder.h"
 #include "memory/memory_map.h"
+#include <iostream>
 
 namespace avrion {
 
@@ -44,7 +45,7 @@ u8 AvrCpu::exec_call(u16 opcode) {
     // 1001 010k kkkk 111k
     // kkkk kkkk kkkk kkkk
     u32 k = ((opcode & 0x01F0) << 13) | ((opcode & 0x0001) << 16) | mem_.fetch16(pc());
-    u32 ret = pc() + 4;
+    u32 ret = pc() + 2;
     if (cfg_.has_22_bit_pc) {
         mem_.write8(--st_.sp, (ret >> 16) & 0xFF); // upper byte pushed first (highest address)
     }
@@ -95,6 +96,7 @@ u8 AvrCpu::exec_ret(u16 opcode) {
     if (cfg_.has_22_bit_pc) {
         ret |= static_cast<u32>(mem_.read8(st_.sp++)) << 16;
     }
+    std::cout << "returning to: " << ret << std::endl;
     set_pc(ret);
     return cfg_.has_22_bit_pc ? 5 : 4;
 }

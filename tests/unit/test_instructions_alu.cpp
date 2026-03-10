@@ -1880,3 +1880,104 @@ TEST_CASE("SUBI - signed overflow sets V and S accordingly", "[subi][alu]")
     REQUIRE((cpu.sreg() & SREG_N) == 0);
     REQUIRE((cpu.sreg() & SREG_S) != 0); // S = N XOR V -> 1
 }
+
+// ---------------------------------------------------------------------------
+// SBCI (0100 KKKK dddd KKKK)
+//
+// Operation : Rd ← Rd - K - C
+// Operands  : Rd ∈ R16–R31, K ∈ 0–255
+// Flags     : C, Z (cleared if result non-zero, otherwise preserved), N, V, S (N XOR V), H
+// ---------------------------------------------------------------------------
+
+// Encode SBCI Rd, K
+static u16 encode_sbci(u8 d, u8 k)
+{
+    u8 d_off = d - 16;
+    return static_cast<u16>(0x4000
+        | ((k & 0xF0) << 4)
+        | ((d_off & 0x0F) << 4)
+        | (k & 0x0F));
+}
+
+TEST_CASE("SBCI - basic subtraction (carry-in = 0) stores result and preserves other regs", "[sbci][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(16, 0x20);
+    cpu.set_reg(17, 0x99); // decoy
+    cpu.set_sreg(0x00);   // carry-in = 0
+
+    cpu.exec_sbci(encode_sbci(16, 0x05)); // 0x20 - 0x05 - 0 = 0x1B
+
+    REQUIRE(cpu.reg(16) == 0x1B);
+    REQUIRE(cpu.reg(17) == 0x99);
+}
+
+TEST_CASE("SBCI - Z preserved when result is zero", "[sbci][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    // Case: result == 0 and Z was set -> Z should remain set
+    cpu.set_reg(18, 0x05);
+    cpu.set_sreg(SREG_Z);
+    cpu.exec_sbci(encode_sbci(18, 0x05)); // 0x05 - 0x05 - 0 = 0
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+
+    // Case: result == 0 and Z was clear -> Z should remain clear
+    cpu.set_reg(19, 0x07);
+    cpu.set_sreg(0x00);
+    cpu.exec_sbci(encode_sbci(19, 0x07)); // 0x07 - 0x07 - 0 = 0
+    REQUIRE((cpu.sreg() & SREG_Z) == 0);
+}
+
+TEST_CASE("SBCI - carry-in affects result and produces borrow (C) and negative (N)", "[sbci][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(20, 0x00);
+    cpu.set_sreg(SREG_C); // carry-in = 1
+
+    cpu.exec_sbci(encode_sbci(20, 0x00)); // 0x00 - 0x00 - 1 = 0xFF
+
+    REQUIRE(cpu.reg(20) == 0xFF);
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+}
+
+TEST_CASE("SBCI - non-zero result clears Z", "[sbci][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(21, 0x10);
+    cpu.set_sreg(SREG_Z); // pre-set Z
+
+    cpu.exec_sbci(encode_sbci(21, 0x01)); // 0x10 - 0x01 - 0 = 0x0F (non-zero)
+
+    REQUIRE((cpu.sreg() & SREG_Z) == 0);
+}
+
+TEST_CASE("SBCI - signed overflow sets V and S accordingly", "[sbci][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    // 0x80 - 0x00 - 1 = 0x7F -> signed overflow
+    cpu.set_reg(22, 0x80);
+    cpu.set_sreg(SREG_C); // carry-in = 1
+
+    cpu.exec_sbci(encode_sbci(22, 0x00));
+
+    REQUIRE(cpu.reg(22) == 0x7F);
+    REQUIRE((cpu.sreg() & SREG_V) != 0);
+    REQUIRE((cpu.sreg() & SREG_N) == 0);
+    REQUIRE((cpu.sreg() & SREG_S) != 0);
+}

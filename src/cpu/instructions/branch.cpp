@@ -101,4 +101,22 @@ u8 AvrCpu::exec_ret(u16 opcode) {
     return cfg_.has_22_bit_pc ? 5 : 4;
 }
 
+u8 AvrCpu::exec_sbis(u16 opcode) {
+    // SBIS
+    // 1001 1011 AAAA Abbb
+    u8 A = (opcode >> 3) & 0x1F;
+    u8 b = opcode & 0x07;
+
+    if (!(sreg() & (1 << b))) { 
+        return 1;
+    }
+
+    u16 next_opcode = mem_.fetch16(pc());
+    const InstructionDesc* desc = lookup_instruction(next_opcode);
+    bool next_is_two_word = desc && desc->is_two_word;
+
+    set_pc(pc() + (next_is_two_word ? 4 : 2));
+    return next_is_two_word ? 3 : 2;
+}
+
 } // namespace avrion

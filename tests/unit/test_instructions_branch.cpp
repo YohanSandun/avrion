@@ -858,6 +858,89 @@ TEST_CASE("CPSE - flags unaffected when not equal", "[cpse]")
 }
 
 // ---------------------------------------------------------------------------
+// SBIS  (1001 1011 AAAA Abbb)
+//
+// Skip next instruction if bit b in IO register A is set. Implementation
+// under test uses SREG bit `b` as the guard. If the bit is 0: no skip (1
+// cycle). If bit is 1: skip next instruction; PC += 2 for single-word
+// next instruction, or +=4 for two-word next instruction. Cycles: 1/2/3.
+// Flags: none affected.
+// ---------------------------------------------------------------------------
+
+static u16 encode_sbis(u8 A, u8 b)
+{
+    return static_cast<u16>(0x9B00 | ((A & 0x1F) << 3) | (b & 0x07));
+}
+
+TEST_CASE("SBIS - bit clear: no skip, 1 cycle", "[sbis]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_sreg(0x00); // bit cleared
+    cpu.set_pc(50);
+    flash_write16(mem.flash(), 50, 0x0000); // single-word next
+
+    u8 cycles = cpu.exec_sbis(encode_sbis(0, 2));
+
+    REQUIRE(cpu.pc() == 50u);
+    REQUIRE(cycles == 1);
+}
+
+TEST_CASE("SBIS - bit set: skip single-word next, PC += 2, 2 cycles", "[sbis]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_sreg(0x04); // bit 2 set
+    cpu.set_pc(60);
+    flash_write16(mem.flash(), 60, 0x0000); // NOP — single-word
+
+    u8 cycles = cpu.exec_sbis(encode_sbis(1, 2));
+
+    REQUIRE(cpu.pc() == 62u);
+    REQUIRE(cycles == 2);
+}
+
+TEST_CASE("SBIS - bit set: skip two-word next, PC += 4, 3 cycles", "[sbis]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_sreg(0x01); // bit 0 set
+    cpu.set_pc(70);
+    flash_write16(mem.flash(), 70, 0x940C); // JMP — two-word
+
+    u8 cycles = cpu.exec_sbis(encode_sbis(2, 0));
+
+    REQUIRE(cpu.pc() == 74u);
+    REQUIRE(cycles == 3);
+}
+
+TEST_CASE("SBIS - flags unaffected", "[sbis]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    constexpr u8 sentinel = 0b10101010;
+    cpu.set_sreg(sentinel | 0x02); // ensure tested bit may be set
+    cpu.set_pc(80);
+    flash_write16(mem.flash(), 80, 0x0000);
+
+    cpu.exec_sbis(encode_sbis(0, 1));
+
+    REQUIRE(cpu.sreg() == (sentinel | 0x02));
+}
+
+// ---------------------------------------------------------------------------
 // RET  (1001 0101 0000 1000)
 //
 // Pops the return address from the stack back into PC.

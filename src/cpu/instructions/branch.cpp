@@ -45,11 +45,11 @@ u8 AvrCpu::exec_call(u16 opcode) {
     // kkkk kkkk kkkk kkkk
     u32 k = ((opcode & 0x01F0) << 13) | ((opcode & 0x0001) << 16) | mem_.fetch16(pc());
     u32 ret = pc() + 4;
-    mem_.write8(st_.sp, ret & 0xFF);
-    mem_.write8(--st_.sp, (ret >> 8) & 0xFF);
     if (cfg_.has_22_bit_pc) {
-        mem_.write8(--st_.sp, (ret >> 16) & 0xFF);
+        mem_.write8(--st_.sp, (ret >> 16) & 0xFF); // upper byte pushed first (highest address)
     }
+    mem_.write8(--st_.sp, (ret >> 8) & 0xFF); // hi byte
+    mem_.write8(--st_.sp, ret & 0xFF);          // lo byte — SP now points here
     set_pc(k << 1);
     return cfg_.has_22_bit_pc ? 4 : 3;
 }
@@ -85,6 +85,18 @@ u8 AvrCpu::exec_cpse(u16 opcode) {
 
     set_pc(pc() + (next_is_two_word ? 4 : 2));
     return next_is_two_word ? 3 : 2;
+}
+
+u8 AvrCpu::exec_ret(u16 opcode) {
+    // RET
+    // 1001 0101 0000 1000
+    u32 ret = mem_.read8(st_.sp++);
+    ret |= static_cast<u32>(mem_.read8(st_.sp++)) << 8;
+    if (cfg_.has_22_bit_pc) {
+        ret |= static_cast<u32>(mem_.read8(st_.sp++)) << 16;
+    }
+    set_pc(ret);
+    return cfg_.has_22_bit_pc ? 5 : 4;
 }
 
 } // namespace avrion

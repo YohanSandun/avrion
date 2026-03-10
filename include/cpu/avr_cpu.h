@@ -75,6 +75,7 @@ public:
   u8 exec_call(u16 opcode);
   u8 exec_breq(u16 opcode);
   u8 exec_cpse(u16 opcode);
+  u8 exec_ret(u16 opcode);
 
 private:
   MemoryMap& mem_;

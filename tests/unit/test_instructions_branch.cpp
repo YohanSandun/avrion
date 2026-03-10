@@ -440,6 +440,17 @@ static DeviceConfig make_22bit_pc_config()
 //   st_.sp = sram_size_bytes - 1 = 2047 = 0x07FF
 static constexpr u16 INITIAL_SP = 0x07FFu;
 
+// Stack layout after a 16-bit-PC CALL push (little-endian, lo at lowest address):
+//   [INITIAL_SP - 2] = ret_lo   ← SP points here after CALL
+//   [INITIAL_SP - 1] = ret_hi
+//   SP_after = INITIAL_SP - 2
+//
+// Stack layout after a 22-bit-PC CALL push:
+//   [INITIAL_SP - 3] = ret_lo   ← SP points here
+//   [INITIAL_SP - 2] = ret_hi
+//   [INITIAL_SP - 1] = ret upper byte
+//   SP_after = INITIAL_SP - 3
+
 TEST_CASE("CALL - PC jumps to decoded target (k in second word)", "[call]")
 {
     auto cfg = make_test_config();
@@ -465,13 +476,13 @@ TEST_CASE("CALL - return address low byte pushed to stack", "[call]")
     mem.attach_cpu(&cpu);
 
     // PC = 0x0100 → ret = pc() + 4 = 0x0104.
-    // Low byte = 0x04 should land at initial SP (0x07FF).
+    // Low byte = 0x04 lands at INITIAL_SP - 2 (lo is at the lowest stack address).
     cpu.set_pc(0x0100);
     flash_write16(mem.flash(), 0x0100, 0x0001); // target word — value doesn't matter here
 
     cpu.exec_call(encode_call(0));
 
-    REQUIRE(mem.read8(INITIAL_SP) == 0x04u);
+    REQUIRE(mem.read8(INITIAL_SP - 2) == 0x04u);
 }
 
 TEST_CASE("CALL - return address high byte pushed to stack", "[call]")
@@ -490,7 +501,7 @@ TEST_CASE("CALL - return address high byte pushed to stack", "[call]")
     REQUIRE(mem.read8(INITIAL_SP - 1) == 0x01u);
 }
 
-TEST_CASE("CALL - SP decremented by 1 after 16-bit-PC push", "[call]")
+TEST_CASE("CALL - SP decremented by 2 after 16-bit-PC push", "[call]")
 {
     auto cfg = make_test_config();
     MemoryMap mem{cfg};
@@ -502,7 +513,7 @@ TEST_CASE("CALL - SP decremented by 1 after 16-bit-PC push", "[call]")
 
     cpu.exec_call(encode_call(0));
 
-    REQUIRE(cpu.sp() == INITIAL_SP - 1);
+    REQUIRE(cpu.sp() == INITIAL_SP - 2);
 }
 
 TEST_CASE("CALL - return address uses pc() at call time, not original instruction address", "[call]")
@@ -518,8 +529,8 @@ TEST_CASE("CALL - return address uses pc() at call time, not original instructio
 
     cpu.exec_call(encode_call(0));
 
-    // Low = 0x04, high = 0x02
-    REQUIRE(mem.read8(INITIAL_SP)     == 0x04u);
+    // lo = 0x04 at INITIAL_SP-2, hi = 0x02 at INITIAL_SP-1
+    REQUIRE(mem.read8(INITIAL_SP - 2) == 0x04u);
     REQUIRE(mem.read8(INITIAL_SP - 1) == 0x02u);
 }
 
@@ -590,8 +601,11 @@ TEST_CASE("CALL - second word is read relative to PC at call time", "[call]")
 
 TEST_CASE("CALL - 22-bit PC: upper ret byte pushed to stack", "[call][22bit]")
 {
-    // PC = 0x0100 → ret = 0x0104. With 22-bit PC, byte 2 of ret (0x00) is
-    // also pushed: stack = [..., 0x00, 0x01, 0x04] at SP, SP-1, SP-2.
+    // PC = 0x0100 → ret = 0x0104. With 22-bit PC, all 3 bytes are pushed
+    // little-endian (lo at lowest address):
+    //   [INITIAL_SP - 3] = ret_lo  (0x04)  ← SP points here
+    //   [INITIAL_SP - 2] = ret_hi  (0x01)
+    //   [INITIAL_SP - 1] = ret upper (0x00)
     auto cfg = make_22bit_pc_config();
     MemoryMap mem{cfg};
     AvrCpu    cpu{mem, cfg};
@@ -602,12 +616,12 @@ TEST_CASE("CALL - 22-bit PC: upper ret byte pushed to stack", "[call][22bit]")
 
     cpu.exec_call(encode_call(0));
 
-    REQUIRE(mem.read8(INITIAL_SP)     == 0x04u); // ret_lo
-    REQUIRE(mem.read8(INITIAL_SP - 1) == 0x01u); // ret_hi
-    REQUIRE(mem.read8(INITIAL_SP - 2) == 0x00u); // ret byte 2
+    REQUIRE(mem.read8(INITIAL_SP - 3) == 0x04u); // ret_lo
+    REQUIRE(mem.read8(INITIAL_SP - 2) == 0x01u); // ret_hi
+    REQUIRE(mem.read8(INITIAL_SP - 1) == 0x00u); // ret upper
 }
 
-TEST_CASE("CALL - 22-bit PC: SP decremented by 2", "[call][22bit]")
+TEST_CASE("CALL - 22-bit PC: SP decremented by 3", "[call][22bit]")
 {
     auto cfg = make_22bit_pc_config();
     MemoryMap mem{cfg};
@@ -619,7 +633,7 @@ TEST_CASE("CALL - 22-bit PC: SP decremented by 2", "[call][22bit]")
 
     cpu.exec_call(encode_call(0));
 
-    REQUIRE(cpu.sp() == INITIAL_SP - 2);
+    REQUIRE(cpu.sp() == INITIAL_SP - 3);
 }
 
 TEST_CASE("CALL - flags not affected", "[call]")
@@ -841,4 +855,245 @@ TEST_CASE("CPSE - flags unaffected when not equal", "[cpse]")
     cpu.exec_cpse(encode_cpse(8, 9));
 
     REQUIRE(cpu.sreg() == sentinel);
+}
+
+// ---------------------------------------------------------------------------
+// RET  (1001 0101 0000 1000)
+//
+// Pops the return address from the stack back into PC.
+// Stack layout expected by RET (little-endian, low byte at lower address):
+//   mem[SP]    = return_addr[7:0]   (lo byte)
+//   mem[SP+1]  = return_addr[15:8]  (hi byte)
+//   (mem[SP+2] = return_addr[23:16] for 22-bit PC devices)
+// After:
+//   PC  = (hi << 8) | lo
+//   SP += 2  (16-bit PC)  /  3  (22-bit PC)
+// Cycles: 4 (16-bit PC) / 5 (22-bit PC)
+// Flags:  none affected
+// ---------------------------------------------------------------------------
+
+TEST_CASE("RET - restores PC from stack (16-bit address)", "[ret]")
+{
+    // Return address 0x1234: lo=0x34 at SP, hi=0x12 at SP+1.
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_sp(0x07FE);
+    mem.write8(0x07FE, 0x34); // lo
+    mem.write8(0x07FF, 0x12); // hi
+
+    cpu.exec_ret(0x9508);
+
+    REQUIRE(cpu.pc() == 0x1234u);
+}
+
+TEST_CASE("RET - SP incremented by 2 after 16-bit pop", "[ret]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_sp(0x07FE);
+    mem.write8(0x07FE, 0x00);
+    mem.write8(0x07FF, 0x00);
+
+    cpu.exec_ret(0x9508);
+
+    REQUIRE(cpu.sp() == 0x0800u);
+}
+
+TEST_CASE("RET - restores full 16-bit PC correctly", "[ret]")
+{
+    // Address 0x7FFE: lo=0xFE, hi=0x7F
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_sp(0x0200);
+    mem.write8(0x0200, 0xFE); // lo
+    mem.write8(0x0201, 0x7F); // hi
+
+    cpu.exec_ret(0x9508);
+
+    REQUIRE(cpu.pc() == 0x7FFEu);
+}
+
+TEST_CASE("RET - returns 4 cycles for 16-bit PC device", "[ret]")
+{
+    auto cfg = make_test_config(); // has_22_bit_pc = false
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_sp(0x07FE);
+    mem.write8(0x07FE, 0x00);
+    mem.write8(0x07FF, 0x01);
+
+    u8 cycles = cpu.exec_ret(0x9508);
+
+    REQUIRE(cycles == 4);
+}
+
+TEST_CASE("RET - returns 5 cycles for 22-bit PC device", "[ret]")
+{
+    auto cfg = make_22bit_pc_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_sp(0x07FD);
+    mem.write8(0x07FD, 0x00);
+    mem.write8(0x07FE, 0x00);
+    mem.write8(0x07FF, 0x00);
+
+    u8 cycles = cpu.exec_ret(0x9508);
+
+    REQUIRE(cycles == 5);
+}
+
+TEST_CASE("RET - restores 22-bit PC from stack", "[ret]")
+{
+    // Return address 0x123456: lo=0x56, hi=0x34, upper=0x12
+    auto cfg = make_22bit_pc_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_sp(0x07FD);
+    mem.write8(0x07FD, 0x56); // lo
+    mem.write8(0x07FE, 0x34); // hi
+    mem.write8(0x07FF, 0x12); // upper
+
+    cpu.exec_ret(0x9508);
+
+    REQUIRE(cpu.pc() == 0x123456u);
+}
+
+TEST_CASE("RET - SP incremented by 3 after 22-bit pop", "[ret]")
+{
+    auto cfg = make_22bit_pc_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_sp(0x07FD);
+    mem.write8(0x07FD, 0x00);
+    mem.write8(0x07FE, 0x00);
+    mem.write8(0x07FF, 0x00);
+
+    cpu.exec_ret(0x9508);
+
+    REQUIRE(cpu.sp() == 0x0800u);
+}
+
+TEST_CASE("RET - flags unaffected", "[ret]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    constexpr u8 sentinel = 0b10110101;
+    cpu.set_sreg(sentinel);
+    cpu.set_sp(0x07FE);
+    mem.write8(0x07FE, 0x00);
+    mem.write8(0x07FF, 0x00);
+
+    cpu.exec_ret(0x9508);
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+TEST_CASE("RET - PC not affected by old register values", "[ret]")
+{
+    // Ensures PC comes entirely from the stack, not from any register.
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    for (u8 i = 0; i < 32; ++i) cpu.set_reg(i, 0xFF);
+    cpu.set_sp(0x07FE);
+    mem.write8(0x07FE, 0xAB); // lo
+    mem.write8(0x07FF, 0xCD); // hi
+
+    cpu.exec_ret(0x9508);
+
+    REQUIRE(cpu.pc() == 0xCDABu);
+}
+
+// ---------------------------------------------------------------------------
+// CALL + RET round-trip
+//
+// After CALL, exec_ret must restore PC to the instruction following CALL
+// (return address = pc_before_call + 4, the size of a 4-byte CALL encoding).
+// SP must be fully restored to its value before CALL.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("CALL+RET round-trip: PC restored to return address", "[call][ret]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    // Place CALL at byte 0x0200; second word (target) can be anything.
+    cpu.set_pc(0x0200);
+    flash_write16(mem.flash(), 0x0200, 0x0000); // target word = 0
+
+    cpu.exec_call(encode_call(0));
+    // Return address = 0x0200 + 4 = 0x0204
+
+    cpu.exec_ret(0x9508);
+
+    REQUIRE(cpu.pc() == 0x0204u);
+}
+
+TEST_CASE("CALL+RET round-trip: SP restored to initial value", "[call][ret]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    const u16 sp_before = cpu.sp();
+
+    cpu.set_pc(0x0100);
+    flash_write16(mem.flash(), 0x0100, 0x0001);
+
+    cpu.exec_call(encode_call(0));
+    cpu.exec_ret(0x9508);
+
+    REQUIRE(cpu.sp() == sp_before);
+}
+
+TEST_CASE("CALL+RET round-trip: nested calls restore SP correctly", "[call][ret]")
+{
+    // Two nested CALLs followed by two RETs should leave SP at its original value.
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    const u16 sp_initial = cpu.sp();
+
+    // First CALL from 0x0100 → second word at 0x0100, target = 0
+    cpu.set_pc(0x0100);
+    flash_write16(mem.flash(), 0x0100, 0x0001);
+    cpu.exec_call(encode_call(0));
+
+    // Second CALL from wherever PC landed; write second word near target
+    u32 mid_pc = cpu.pc();
+    flash_write16(mem.flash(), mid_pc, 0x0002);
+    cpu.exec_call(encode_call(0));
+
+    // Unwind
+    cpu.exec_ret(0x9508);
+    cpu.exec_ret(0x9508);
+
+    REQUIRE(cpu.sp() == sp_initial);
 }

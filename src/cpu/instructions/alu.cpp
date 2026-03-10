@@ -241,4 +241,23 @@ u8 AvrCpu::exec_or(u16 opcode) {
     return 1;
 }
 
+u8 AvrCpu::exec_dec(u16 opcode) {
+    // DEC
+    // 1001 010d dddd 1010
+    u8 d = (opcode >> 4) & 0x1F;
+    u8 rd = reg(d);
+    u8 result = rd - 1;
+    set_reg(d, result);
+
+    u8 _sreg = sreg();
+    _sreg = result == 0
+        ? (_sreg | 0x02) : (_sreg & ~0x02u); // Z set if result is zero
+    _sreg = (result & 0x80) != 0
+        ? (_sreg | 0x04) : (_sreg & ~0x04); // N set if bit 7 of result is set
+    _sreg = (_sreg & ~0x08u) | ((rd == 0x80 ? 1u : 0u) << 3); // V flag: set only when Rd was 0x80
+    _sreg |= (((_sreg & 0x04) >> 2) ^ ((_sreg & 0x08) >> 3)) << 4; // S = N XOR V
+    set_sreg(_sreg);
+    return 1;
+}
+
 } // namespace avrion

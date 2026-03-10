@@ -198,6 +198,102 @@ TEST_CASE("EOR - S equals N when result is negative", "[eor][alu]")
     REQUIRE((cpu.sreg() & SREG_S) != 0);
 }
 
+// ---------------------------------------------------------------------------
+// DEC  (1001 010d dddd 1010)
+//
+// Operation : Rd <- Rd - 1
+// Flags     : Z, N, V, S (N XOR V)
+// ---------------------------------------------------------------------------
+
+// Encode DEC Rd
+static u16 encode_dec(u8 d)
+{
+    return static_cast<u16>(0x940A | ((d & 0x1F) << 4));
+}
+
+TEST_CASE("DEC - decrements register value", "[dec][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(5, 0x02);
+    cpu.exec_dec(encode_dec(5));
+
+    REQUIRE(cpu.reg(5) == 0x01);
+}
+
+TEST_CASE("DEC - zero result sets Z flag", "[dec][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(7, 0x01);
+    cpu.set_sreg(0x00);
+    cpu.exec_dec(encode_dec(7));
+
+    REQUIRE(cpu.reg(7) == 0x00);
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+}
+
+TEST_CASE("DEC - negative result sets N flag", "[dec][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(4, 0x00); // 0x00 - 1 = 0xFF (negative)
+    cpu.exec_dec(encode_dec(4));
+
+    REQUIRE(cpu.reg(4) == 0xFF);
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+}
+
+TEST_CASE("DEC - overflow (Rd was 0x80) sets V and S", "[dec][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(3, 0x80);
+    cpu.set_sreg(0x00);
+    cpu.exec_dec(encode_dec(3)); // 0x80 - 1 = 0x7F -> signed overflow
+
+    REQUIRE(cpu.reg(3) == 0x7F);
+    REQUIRE((cpu.sreg() & SREG_V) != 0);
+    REQUIRE((cpu.sreg() & SREG_S) != 0); // S = N XOR V -> 1
+}
+
+TEST_CASE("DEC - only destination modified, adjacent registers unchanged", "[dec][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(9,  0xAA); // decoy below
+    cpu.set_reg(10, 0x05); // target
+    cpu.set_reg(11, 0xBB); // decoy above
+
+    cpu.exec_dec(encode_dec(10));
+
+    REQUIRE(cpu.reg(10) == 0x04);
+    REQUIRE(cpu.reg(9)  == 0xAA);
+    REQUIRE(cpu.reg(11) == 0xBB);
+}
+
+TEST_CASE("DEC - C flag not modified", "[dec][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(SREG_C);
+    cpu.set_reg(8, 0x02);
+    cpu.exec_dec(encode_dec(8));
+
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+}
 TEST_CASE("EOR - S cleared when result is positive", "[eor][alu]")
 {
     auto cfg = make_test_config();

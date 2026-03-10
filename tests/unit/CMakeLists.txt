@@ -37,3 +37,12 @@ add_executable(test_instructions_data_transfer
 target_link_libraries(test_instructions_data_transfer PRIVATE avr_core Catch2::Catch2WithMain)
 
 catch_discover_tests(test_instructions_data_transfer)
+
+# ---- Instruction unit tests — Misc --------------------------------
+add_executable(test_instructions_misc
+  test_instructions_misc.cpp
+)
+
+target_link_libraries(test_instructions_misc PRIVATE avr_core Catch2::Catch2WithMain)
+
+catch_discover_tests(test_instructions_misc)

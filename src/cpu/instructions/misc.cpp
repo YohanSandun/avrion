@@ -11,4 +11,9 @@ u8 AvrCpu::exec_sei(u16) {
     return 1;
 }
 
+u8 AvrCpu::exec_cli(u16) {
+    set_sreg(sreg() & ~0x80); // clear I bit (bit 7)
+    return 1;
+}
+
 } // namespace avrion

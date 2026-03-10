@@ -4,11 +4,12 @@
 
 namespace avrion {
 
-static const std::array<InstructionDesc, 28> kInstructionTable = {{
+static const std::array<InstructionDesc, 29> kInstructionTable = {{
     // mask  pattern name
     // misc
     {0xFFFF, 0x0000, "NOP",    &AvrCpu::exec_nop},
     {0xFFFF, 0x9478, "SEI",    &AvrCpu::exec_sei},
+    {0xFFFF, 0x94F8, "CLI",    &AvrCpu::exec_cli},
 
     // data transfer
     {0xF800, 0xB800, "OUT",    &AvrCpu::exec_out},

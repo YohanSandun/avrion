@@ -37,6 +37,7 @@ public:
   // Misc
   u8 exec_nop(u16 opcode);
   u8 exec_sei(u16 opcode);
+  u8 exec_cli(u16 opcode);
 
   // ALU
   u8 exec_eor(u16 opcode);

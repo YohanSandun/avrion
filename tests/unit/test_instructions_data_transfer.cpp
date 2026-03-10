@@ -1905,6 +1905,77 @@ TEST_CASE("LPM Z+ - flags not affected", "[lpm_z_post_inc][data_transfer]")
 }
 
 // ---------------------------------------------------------------------------
+// LD X / LD X+ / LD -X
+// 1001 000d dddd 1100  (LD X)
+// 1001 000d dddd 1101  (LD X+)
+// 1001 000d dddd 1110  (LD -X)
+// ---------------------------------------------------------------------------
+
+// Encode LD X variants
+static u16 encode_ld_x(u8 d)
+{
+    return static_cast<u16>(0x900C | ((d & 0x1F) << 4));
+}
+static u16 encode_ld_x_post_inc(u8 d)
+{
+    return static_cast<u16>(0x900D | ((d & 0x1F) << 4));
+}
+static u16 encode_ld_x_pre_dec(u8 d)
+{
+    return static_cast<u16>(0x900E | ((d & 0x1F) << 4));
+}
+
+TEST_CASE("LD X - loads Rr from memory at X address", "[ld_x][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // X = 0x0100
+    cpu.set_reg(26, 0x00);
+    cpu.set_reg(27, 0x01);
+
+    mem.write8(0x0100, 0xAB);
+    cpu.exec_ld_x(encode_ld_x(5)); // LD R5, X
+
+    REQUIRE(cpu.reg(5) == 0xAB);
+}
+
+TEST_CASE("LD X+ - loads then increments X", "[ld_x_post_inc][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // X = 0x0105
+    cpu.set_reg(26, 0x05);
+    cpu.set_reg(27, 0x01);
+
+    mem.write8(0x0105, 0xFE);
+    cpu.exec_ld_x_post_inc(encode_ld_x_post_inc(3)); // LD R3, X+
+
+    REQUIRE(cpu.reg(3) == 0xFE);
+    REQUIRE(cpu.x() == 0x0106);
+}
+
+TEST_CASE("LD -X - decrements X then loads", "[ld_x_pre_dec][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // X initially = 0x0105 -> pre-decrement to 0x0104
+    cpu.set_reg(26, 0x05);
+    cpu.set_reg(27, 0x01);
+
+    mem.write8(0x0104, 0x11);
+    cpu.exec_ld_x_pre_dec(encode_ld_x_pre_dec(7)); // LD R7, -X
+
+    REQUIRE(cpu.reg(7) == 0x11);
+    REQUIRE(cpu.x() == 0x0104);
+}
+
+// ---------------------------------------------------------------------------
 // MOVW (0000 0001 dddd rrrr)
 //
 // Copies register pair Rr:Rr+1 into Rd:Rd+1 where d and r are even.

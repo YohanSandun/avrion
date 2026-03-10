@@ -115,4 +115,32 @@ u8 AvrCpu::exec_movw(u16 opcode) {
     return 1;
 }
 
+u8 AvrCpu::exec_ld_x(u16 opcode) {
+    // LD X
+    // 1001 000d dddd 1100
+    u8 d = (opcode & 0x01F0) >> 4;
+    set_reg(d, mem_.read8(x()));
+    return 2;
+}
+
+u8 AvrCpu::exec_ld_x_post_inc(u16 opcode) {
+    // LD X+
+    // 1001 000d dddd 1101
+    u8 d = (opcode & 0x01F0) >> 4;
+    u16 addr = x();
+    set_reg(d, mem_.read8(addr));
+    set_x(addr + 1);
+    return 2;
+}
+
+u8 AvrCpu::exec_ld_x_pre_dec(u16 opcode) {
+    // LD -X
+    // 1001 000d dddd 1110
+    u8 d = (opcode & 0x01F0) >> 4;
+    u16 addr = x() - 1;
+    set_x(addr);
+    set_reg(d, mem_.read8(addr));
+    return 2;
+}
+
 } // namespace avrion

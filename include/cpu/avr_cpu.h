@@ -59,6 +59,7 @@ public:
   u8 exec_lpm(u16 opcode);
   u8 exec_lpm_z(u16 opcode);
   u8 exec_lpm_z_post_inc(u16 opcode);
+  u8 exec_movw(u16 opcode);
 
   // Branching
   u8 exec_jmp(u16 opcode);

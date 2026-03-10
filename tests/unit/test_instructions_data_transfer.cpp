@@ -1903,3 +1903,61 @@ TEST_CASE("LPM Z+ - flags not affected", "[lpm_z_post_inc][data_transfer]")
 
     REQUIRE(cpu.sreg() == sentinel);
 }
+
+// ---------------------------------------------------------------------------
+// MOVW (0000 0001 dddd rrrr)
+//
+// Copies register pair Rr:Rr+1 into Rd:Rd+1 where d and r are even.
+// Flags: none affected.
+// ---------------------------------------------------------------------------
+
+// Encode MOVW Rd, Rr
+static u16 encode_movw(u8 d, u8 r)
+{
+   return static_cast<u16>(
+        0x0100 | (((d >> 1) & 0x0F) << 4) | ((r >> 1) & 0x0F)
+    );
+}
+
+TEST_CASE("MOVW - copies two registers (non-overlapping)", "[movw][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // Source pair R24:R25 = 0x12,0x34
+    cpu.set_reg(24, 0x12);
+    cpu.set_reg(25, 0x34);
+
+    // Ensure destination pair R22:R23 are zero initially
+    REQUIRE(cpu.reg(22) == 0x00);
+    REQUIRE(cpu.reg(23) == 0x00);
+
+    cpu.exec_movw(encode_movw(22, 24)); // MOVW R22, R24
+
+    REQUIRE(cpu.reg(22) == 0x12);
+    REQUIRE(cpu.reg(23) == 0x34);
+
+    // Source registers must remain unchanged
+    REQUIRE(cpu.reg(24) == 0x12);
+    REQUIRE(cpu.reg(25) == 0x34);
+}
+
+TEST_CASE("MOVW - copies pair at lower registers (R0..R1 -> R8..R9)", "[movw][data_transfer]")
+{
+    auto cfg = make_io_in_sram_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(0, 0xAA);
+    cpu.set_reg(1, 0xBB);
+
+    cpu.exec_movw(encode_movw(8, 0)); // MOVW R8, R0
+
+    REQUIRE(cpu.reg(8) == 0xAA);
+    REQUIRE(cpu.reg(9) == 0xBB);
+
+    // Verify adjacent registers not modified
+    REQUIRE(cpu.reg(7) == 0x00);
+    REQUIRE(cpu.reg(10) == 0x00);
+}

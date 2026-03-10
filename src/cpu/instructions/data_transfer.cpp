@@ -105,4 +105,14 @@ u8 AvrCpu::exec_lpm_z_post_inc(u16 opcode) {
     return 3;
 }
 
+u8 AvrCpu::exec_movw(u16 opcode) {
+    // MOVW
+    // 0000 0001 dddd rrrr
+    u8 d = ((opcode & 0x00F0) >> 4) << 1;
+    u8 r = (opcode & 0x000F) << 1;
+    set_reg(d, reg(r));
+    set_reg(d + 1, reg(r + 1));
+    return 1;
+}
+
 } // namespace avrion

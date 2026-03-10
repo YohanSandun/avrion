@@ -1,4 +1,5 @@
 #include "cpu/avr_cpu.h"
+#include "cpu/decoder.h"
 #include "memory/memory_map.h"
 
 namespace avrion {
@@ -66,6 +67,24 @@ u8 AvrCpu::exec_breq(u16 opcode) {
     }
     set_pc(pc() + static_cast<u32>(static_cast<int16_t>(k) << 1));
     return 2;
+}
+
+u8 AvrCpu::exec_cpse(u16 opcode) {
+    // CPSE
+    // 0001 00rd dddd rrrr
+    u8 d = (opcode >> 4) & 0x1F;
+    u8 r = (opcode & 0x000F) | ((opcode >> 5) & 0x10);
+
+    if (reg(d) != reg(r)) {
+        return 1;
+    }
+
+    u16 next_opcode = mem_.fetch16(pc());
+    const InstructionDesc* desc = lookup_instruction(next_opcode);
+    bool next_is_two_word = desc && desc->is_two_word;
+
+    set_pc(pc() + (next_is_two_word ? 4 : 2));
+    return next_is_two_word ? 3 : 2;
 }
 
 } // namespace avrion

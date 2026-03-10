@@ -4,7 +4,7 @@
 
 namespace avrion {
 
-static const std::array<InstructionDesc, 33> kInstructionTable = {{
+static const std::array<InstructionDesc, 34> kInstructionTable = {{
     // mask  pattern name
     // misc
     {0xFFFF, 0x0000, "NOP",    &AvrCpu::exec_nop},
@@ -18,8 +18,8 @@ static const std::array<InstructionDesc, 33> kInstructionTable = {{
     {0xFE0F, 0x920C, "ST X",   &AvrCpu::exec_st_x},
     {0xFE0F, 0x920D, "ST X+",  &AvrCpu::exec_st_x_post_inc},
     {0xFE0F, 0x920E, "ST -X",  &AvrCpu::exec_st_x_pre_dec},
-    {0xFE0F, 0x9000, "LDS",    &AvrCpu::exec_lds},
-    {0xFE0F, 0x9200, "STS",    &AvrCpu::exec_sts},
+    {0xFE0F, 0x9000, "LDS",    &AvrCpu::exec_lds,  true},
+    {0xFE0F, 0x9200, "STS",    &AvrCpu::exec_sts,  true},
     {0xFFFF, 0x95C8, "LPM",    &AvrCpu::exec_lpm},
     {0xFE0F, 0x9004, "LPM Z",  &AvrCpu::exec_lpm_z},
     {0xFE0F, 0x9005, "LPM Z+", &AvrCpu::exec_lpm_z_post_inc},
@@ -41,11 +41,12 @@ static const std::array<InstructionDesc, 33> kInstructionTable = {{
     {0xFC00, 0x2800, "OR",     &AvrCpu::exec_or},
 
     // branch
-    {0xFE0E, 0x940C, "JMP",    &AvrCpu::exec_jmp},
+    {0xFE0E, 0x940C, "JMP",    &AvrCpu::exec_jmp,  true},
     {0xF000, 0xC000, "RJMP",   &AvrCpu::exec_rjmp},
     {0xFC07, 0xF401, "BRNE",   &AvrCpu::exec_brne},
-    {0xFE0E, 0x940E, "CALL",   &AvrCpu::exec_call},
-    {0xFC07, 0xF001, "BREQ",   &AvrCpu::exec_breq}
+    {0xFE0E, 0x940E, "CALL",   &AvrCpu::exec_call, true},
+    {0xFC07, 0xF001, "BREQ",   &AvrCpu::exec_breq},
+    {0xFC00, 0x1000, "CPSE",   &AvrCpu::exec_cpse}
 }};
 
 const InstructionDesc* instruction_table_begin() {

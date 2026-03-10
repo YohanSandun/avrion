@@ -11,6 +11,7 @@ struct InstructionDesc {
     u16 pattern;
     const char* name;
     InstrExecFn exec;
+    bool is_two_word = false;
 };
 
 } // namespace avrion

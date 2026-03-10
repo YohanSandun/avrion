@@ -638,3 +638,207 @@ TEST_CASE("CALL - flags not affected", "[call]")
 
     REQUIRE(cpu.sreg() == sentinel);
 }
+
+// ---------------------------------------------------------------------------
+// CPSE  (0001 00rd dddd rrrr)
+//
+// Compare Rd and Rr; if equal, skip the next instruction.
+//   Rd != Rr: PC unchanged,   return 1 cycle.
+//   Rd == Rr, next is single-word: PC += 2, return 2 cycles.
+//   Rd == Rr, next is two-word:    PC += 4, return 3 cycles.
+// Flags: none affected.
+// ---------------------------------------------------------------------------
+
+static u16 encode_cpse(u8 d, u8 r)
+{
+    // 0001 00rd dddd rrrr
+    return static_cast<u16>(0x1000
+        | ((r & 0x10) << 5)   // r[4] → bit 9
+        | ((d & 0x1F) << 4)   // d[4:0] → bits [8:4]
+        | (r & 0x0F));        // r[3:0] → bits [3:0]
+}
+
+TEST_CASE("CPSE - not equal: PC unchanged, 1 cycle", "[cpse]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(2, 0x10);
+    cpu.set_reg(3, 0x20);
+    cpu.set_pc(100);
+
+    u8 cycles = cpu.exec_cpse(encode_cpse(2, 3));
+
+    REQUIRE(cpu.pc() == 100u);
+    REQUIRE(cycles == 1);
+}
+
+TEST_CASE("CPSE - equal, unknown next opcode (single-word): PC += 2, 2 cycles", "[cpse]")
+{
+    // An unrecognised opcode is treated as single-word (is_two_word == false).
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(4, 0xAB);
+    cpu.set_reg(5, 0xAB);
+    cpu.set_pc(100);
+    flash_write16(mem.flash(), 100, 0x0000); // NOP — single-word
+
+    u8 cycles = cpu.exec_cpse(encode_cpse(4, 5));
+
+    REQUIRE(cpu.pc() == 102u);
+    REQUIRE(cycles == 2);
+}
+
+TEST_CASE("CPSE - equal, JMP next (two-word): PC += 4, 3 cycles", "[cpse]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(0, 0x55);
+    cpu.set_reg(1, 0x55);
+    cpu.set_pc(100);
+    flash_write16(mem.flash(), 100, 0x940C); // JMP — two-word
+
+    u8 cycles = cpu.exec_cpse(encode_cpse(0, 1));
+
+    REQUIRE(cpu.pc() == 104u);
+    REQUIRE(cycles == 3);
+}
+
+TEST_CASE("CPSE - equal, CALL next (two-word): PC += 4, 3 cycles", "[cpse]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(10, 0xFF);
+    cpu.set_reg(11, 0xFF);
+    cpu.set_pc(50);
+    flash_write16(mem.flash(), 50, 0x940E); // CALL — two-word
+
+    u8 cycles = cpu.exec_cpse(encode_cpse(10, 11));
+
+    REQUIRE(cpu.pc() == 54u);
+    REQUIRE(cycles == 3);
+}
+
+TEST_CASE("CPSE - equal, LDS next (two-word): PC += 4, 3 cycles", "[cpse]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(6, 0x01);
+    cpu.set_reg(7, 0x01);
+    cpu.set_pc(200);
+    flash_write16(mem.flash(), 200, 0x9000); // LDS — two-word
+
+    u8 cycles = cpu.exec_cpse(encode_cpse(6, 7));
+
+    REQUIRE(cpu.pc() == 204u);
+    REQUIRE(cycles == 3);
+}
+
+TEST_CASE("CPSE - both registers zero: skip taken (single-word next)", "[cpse]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // r0 and r1 default to 0 after reset
+    cpu.set_pc(20);
+    flash_write16(mem.flash(), 20, 0x0000); // NOP
+
+    u8 cycles = cpu.exec_cpse(encode_cpse(0, 1));
+
+    REQUIRE(cpu.pc() == 22u);
+    REQUIRE(cycles == 2);
+}
+
+TEST_CASE("CPSE - same register (d == r): always equal, skip taken", "[cpse]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(5, 0x42); // any value
+    cpu.set_pc(60);
+    flash_write16(mem.flash(), 60, 0x0000); // NOP
+
+    u8 cycles = cpu.exec_cpse(encode_cpse(5, 5));
+
+    REQUIRE(cpu.pc() == 62u);
+    REQUIRE(cycles == 2);
+}
+
+TEST_CASE("CPSE - high register pair r28/r29 not equal: no skip", "[cpse]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0xAA);
+    cpu.set_reg(29, 0xBB);
+    cpu.set_pc(80);
+
+    u8 cycles = cpu.exec_cpse(encode_cpse(28, 29));
+
+    REQUIRE(cpu.pc() == 80u);
+    REQUIRE(cycles == 1);
+}
+
+TEST_CASE("CPSE - high register pair r30/r31 equal: skip taken", "[cpse]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x7F);
+    cpu.set_reg(31, 0x7F);
+    cpu.set_pc(40);
+    flash_write16(mem.flash(), 40, 0x0000); // NOP
+
+    u8 cycles = cpu.exec_cpse(encode_cpse(30, 31));
+
+    REQUIRE(cpu.pc() == 42u);
+    REQUIRE(cycles == 2);
+}
+
+TEST_CASE("CPSE - flags unaffected when equal", "[cpse]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    constexpr u8 sentinel = 0b10110101;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(8, 0x33);
+    cpu.set_reg(9, 0x33);
+    cpu.set_pc(100);
+    flash_write16(mem.flash(), 100, 0x0000);
+
+    cpu.exec_cpse(encode_cpse(8, 9));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+TEST_CASE("CPSE - flags unaffected when not equal", "[cpse]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    constexpr u8 sentinel = 0b11001010;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(8, 0x11);
+    cpu.set_reg(9, 0x22);
+    cpu.set_pc(100);
+
+    cpu.exec_cpse(encode_cpse(8, 9));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}

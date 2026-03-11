@@ -294,6 +294,115 @@ TEST_CASE("DEC - C flag not modified", "[dec][alu]")
 
     REQUIRE((cpu.sreg() & SREG_C) != 0);
 }
+// ---------------------------------------------------------------------------
+// SUB  (0001 10rd dddd rrrr)
+//
+// Operation : Rd <- Rd - Rr
+// Flags     : C, Z, N, V, S (N XOR V), H
+// ---------------------------------------------------------------------------
+
+// Encode SUB Rd, Rr
+static u16 encode_sub(u8 d, u8 r)
+{
+    return static_cast<u16>(0x1800
+        | ((d & 0x1F) << 4)
+        | ((r & 0x10) << 5)
+        | (r & 0x0F));
+}
+
+TEST_CASE("SUB - basic subtraction stores result and preserves source", "[sub][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(2, 0x20);
+    cpu.set_reg(3, 0x05);
+    cpu.set_reg(4, 0x99); // decoy
+
+    cpu.exec_sub(encode_sub(2, 3)); // 0x20 - 0x05 = 0x1B
+
+    REQUIRE(cpu.reg(2) == 0x1B);
+    REQUIRE(cpu.reg(3) == 0x05);
+    REQUIRE(cpu.reg(4) == 0x99);
+}
+
+TEST_CASE("SUB - zero result sets Z flag", "[sub][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(6, 0x07);
+    cpu.set_reg(7, 0x07);
+    cpu.set_sreg(0x00);
+    cpu.exec_sub(encode_sub(6, 7));
+
+    REQUIRE(cpu.reg(6) == 0x00);
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+}
+
+TEST_CASE("SUB - borrow sets C and negative sets N", "[sub][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(8, 0x00);
+    cpu.set_reg(9, 0x01);
+    cpu.set_sreg(0x00);
+    cpu.exec_sub(encode_sub(8, 9)); // 0x00 - 0x01 = 0xFF
+
+    REQUIRE(cpu.reg(8) == 0xFF);
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+}
+
+TEST_CASE("SUB - signed overflow sets V and S accordingly", "[sub][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    // 0x80 - 0x01 = 0x7F => signed overflow
+    cpu.set_reg(10, 0x80);
+    cpu.set_reg(11, 0x01);
+    cpu.set_sreg(0x00);
+    cpu.exec_sub(encode_sub(10, 11));
+
+    REQUIRE(cpu.reg(10) == 0x7F);
+    REQUIRE((cpu.sreg() & SREG_V) != 0);
+    REQUIRE((cpu.sreg() & SREG_S) != 0);
+}
+
+TEST_CASE("SUB - H flag (borrow from bit 3) is set correctly", "[sub][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    // 0x00 - 0x08 = 0xF8 -> borrow from bit 3
+    cpu.set_reg(12, 0x00);
+    cpu.set_reg(13, 0x08);
+    cpu.set_sreg(0x00);
+    cpu.exec_sub(encode_sub(12, 13));
+
+    REQUIRE((cpu.sreg() & SREG_H) != 0);
+}
+
+TEST_CASE("SUB - T and I flags preserved", "[sub][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_sreg(0xC0); // T and I set
+    cpu.set_reg(14, 0x10);
+    cpu.set_reg(15, 0x01);
+    cpu.exec_sub(encode_sub(14, 15));
+
+    REQUIRE((cpu.sreg() & 0xC0) == 0xC0);
+}
 TEST_CASE("EOR - S cleared when result is positive", "[eor][alu]")
 {
     auto cfg = make_test_config();

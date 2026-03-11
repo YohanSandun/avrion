@@ -52,6 +52,7 @@ public:
   u8 exec_or(u16 opcode);
   u8 exec_dec(u16 opcode);
   u8 exec_sub(u16 opcode);
+  u8 exec_sbc(u16 opcode);
 
   // Data transfer
   u8 exec_out(u16 opcode);

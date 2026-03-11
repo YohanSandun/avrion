@@ -335,7 +335,7 @@ TEST_CASE("SUB - zero result sets Z flag", "[sub][alu]")
 
     cpu.set_reg(6, 0x07);
     cpu.set_reg(7, 0x07);
-    cpu.set_sreg(0x00);
+    cpu.set_sreg(SREG_Z); // Z preserved by SBC when result is zero
     cpu.exec_sub(encode_sub(6, 7));
 
     REQUIRE(cpu.reg(6) == 0x00);
@@ -400,6 +400,126 @@ TEST_CASE("SUB - T and I flags preserved", "[sub][alu]")
     cpu.set_reg(14, 0x10);
     cpu.set_reg(15, 0x01);
     cpu.exec_sub(encode_sub(14, 15));
+
+    REQUIRE((cpu.sreg() & 0xC0) == 0xC0);
+}
+// ---------------------------------------------------------------------------
+// SBC  (0000 10rd dddd rrrr)
+//
+// Operation : Rd <- Rd - Rr - C
+// Flags     : C, Z, N, V, S (N XOR V), H
+// ---------------------------------------------------------------------------
+
+// Encode SBC Rd, Rr
+static u16 encode_sbc(u8 d, u8 r)
+{
+    return static_cast<u16>(0x0800
+        | ((d & 0x1F) << 4)
+        | ((r & 0x10) << 5)
+        | (r & 0x0F));
+}
+
+TEST_CASE("SBC - basic subtraction includes carry and preserves source", "[sbc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(2, 0x05);
+    cpu.set_reg(3, 0x02);
+    cpu.set_sreg(0x00); // C clear
+    cpu.exec_sbc(encode_sbc(2, 3)); // 0x05 - 0x02 - 0 = 0x03
+
+    REQUIRE(cpu.reg(2) == 0x03);
+    REQUIRE(cpu.reg(3) == 0x02);
+
+    // now with carry set: subtract one more
+    cpu.set_reg(2, 0x05);
+    cpu.set_sreg(SREG_C);
+    cpu.exec_sbc(encode_sbc(2, 3)); // 0x05 - 0x02 - 1 = 0x02
+    REQUIRE(cpu.reg(2) == 0x02);
+}
+
+TEST_CASE("SBC - zero result sets Z flag (and cleared when non-zero)", "[sbc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(6, 0x07);
+    cpu.set_reg(7, 0x07);
+    cpu.set_sreg(SREG_Z);
+    cpu.exec_sbc(encode_sbc(6, 7)); // 0x07 - 0x07 - 0 = 0x00
+
+    REQUIRE(cpu.reg(6) == 0x00);
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+
+    // non-zero clears Z
+    cpu.set_reg(6, 0x02);
+    cpu.set_reg(7, 0x01);
+    cpu.set_sreg(SREG_Z); // pre-set Z
+    cpu.exec_sbc(encode_sbc(6, 7)); // 0x02 - 0x01 = 0x01
+    REQUIRE((cpu.sreg() & SREG_Z) == 0);
+}
+
+TEST_CASE("SBC - borrow sets C and negative sets N", "[sbc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(8, 0x00);
+    cpu.set_reg(9, 0x01);
+    cpu.set_sreg(0x00);
+    cpu.exec_sbc(encode_sbc(8, 9)); // 0x00 - 0x01 = 0xFF
+
+    REQUIRE(cpu.reg(8) == 0xFF);
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+}
+
+TEST_CASE("SBC - signed overflow sets V and S accordingly", "[sbc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    // 0x80 - 0x01 = 0x7F => signed overflow
+    cpu.set_reg(10, 0x80);
+    cpu.set_reg(11, 0x01);
+    cpu.set_sreg(0x00);
+    cpu.exec_sbc(encode_sbc(10, 11));
+
+    REQUIRE(cpu.reg(10) == 0x7F);
+    REQUIRE((cpu.sreg() & SREG_V) != 0);
+    REQUIRE((cpu.sreg() & SREG_S) != 0);
+}
+
+TEST_CASE("SBC - H flag (borrow from bit 3) is set correctly", "[sbc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    // 0x00 - 0x08 = 0xF8 -> borrow from bit 3
+    cpu.set_reg(12, 0x00);
+    cpu.set_reg(13, 0x08);
+    cpu.set_sreg(0x00);
+    cpu.exec_sbc(encode_sbc(12, 13));
+
+    REQUIRE((cpu.sreg() & SREG_H) != 0);
+}
+
+TEST_CASE("SBC - T and I flags preserved", "[sbc][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_sreg(0xC0); // T and I set
+    cpu.set_reg(14, 0x10);
+    cpu.set_reg(15, 0x01);
+    cpu.exec_sbc(encode_sbc(14, 15));
 
     REQUIRE((cpu.sreg() & 0xC0) == 0xC0);
 }

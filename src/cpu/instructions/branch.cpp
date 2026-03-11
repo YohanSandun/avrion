@@ -1,7 +1,6 @@
 #include "cpu/avr_cpu.h"
 #include "cpu/decoder.h"
 #include "memory/memory_map.h"
-#include <iostream>
 
 namespace avrion {
 
@@ -96,7 +95,7 @@ u8 AvrCpu::exec_ret(u16 opcode) {
     if (cfg_.has_22_bit_pc) {
         ret |= static_cast<u32>(mem_.read8(st_.sp++)) << 16;
     }
-    std::cout << "returning to: " << ret << std::endl;
+
     set_pc(ret);
     return cfg_.has_22_bit_pc ? 5 : 4;
 }
@@ -117,6 +116,21 @@ u8 AvrCpu::exec_sbis(u16 opcode) {
 
     set_pc(pc() + (next_is_two_word ? 4 : 2));
     return next_is_two_word ? 3 : 2;
+}
+
+u8 AvrCpu::exec_brcs(u16 opcode) {
+    // BRCS
+    // 1111 00kk kkkk k000
+    if (!(sreg() & 0x01)) { // C flag not set → not taken
+        return 1;
+    }
+    
+    u16 k = (opcode & 0x03F8) >> 3;
+    if (k & 0x0040) {
+        k |= 0xFF80;
+    }
+    set_pc(pc() + static_cast<u32>(static_cast<int16_t>(k) << 1));
+    return 2;
 }
 
 } // namespace avrion

@@ -15,7 +15,7 @@ int main() {
         dev.load_flash(0, flash_data.data(), flash_data.size());
         dev.reset();
 
-        dev.run_cycles(10000000);
+        dev.run_cycles(1000000);
 
         std::cout << "Program loaded into flash." << std::endl;
         return 0;

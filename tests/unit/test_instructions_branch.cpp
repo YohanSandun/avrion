@@ -342,6 +342,179 @@ TEST_CASE("BRNE - Z=0: branch is taken", "[brne]")
     REQUIRE(cpu.pc() == 26u);
 }
 
+    // ---------------------------------------------------------------------------
+    // BRCS  (1111 00kk kkkk k000)
+    //
+    // Branch if C set. Relative branch with signed 7-bit word offset k.
+    // ---------------------------------------------------------------------------
+
+    // Encode BRCS with a signed 7-bit word offset k.
+    static u16 encode_brcs(int8_t k)
+    {
+        return static_cast<u16>(0xF000 | ((static_cast<u16>(k) & 0x7F) << 3));
+    }
+
+    TEST_CASE("BRCS - forward branch (positive offset)", "[brcs]")
+    {
+        auto cfg = make_test_config();
+        MemoryMap mem{cfg};
+        AvrCpu    cpu{mem, cfg};
+
+        // PC already past opcode; k=+3 words → +6 bytes
+        cpu.set_pc(20);
+        cpu.set_sreg(0x01); // C=1 so branch is taken
+        cpu.exec_brcs(encode_brcs(3));
+
+        REQUIRE(cpu.pc() == 26u);
+    }
+
+    TEST_CASE("BRCS - backward branch (negative offset)", "[brcs]")
+    {
+        auto cfg = make_test_config();
+        MemoryMap mem{cfg};
+        AvrCpu    cpu{mem, cfg};
+
+        cpu.set_pc(100);
+        cpu.set_sreg(0x01); // C=1
+        cpu.exec_brcs(encode_brcs(-5));
+
+        REQUIRE(cpu.pc() == 90u);
+    }
+
+    TEST_CASE("BRCS - zero offset stays at current PC", "[brcs]")
+    {
+        auto cfg = make_test_config();
+        MemoryMap mem{cfg};
+        AvrCpu    cpu{mem, cfg};
+
+        cpu.set_pc(50);
+        cpu.exec_brcs(encode_brcs(0));
+
+        REQUIRE(cpu.pc() == 50u);
+    }
+
+    TEST_CASE("BRCS - self-loop (k=-1 jumps back to own address)", "[brcs]")
+    {
+        auto cfg = make_test_config();
+        MemoryMap mem{cfg};
+        AvrCpu    cpu{mem, cfg};
+
+        cpu.set_pc(2);
+        cpu.set_sreg(0x01); // C=1
+        cpu.exec_brcs(encode_brcs(-1));
+
+        REQUIRE(cpu.pc() == 0u);
+    }
+
+    TEST_CASE("BRCS - max positive offset (k=+63)", "[brcs]")
+    {
+        auto cfg = make_test_config();
+        MemoryMap mem{cfg};
+        AvrCpu    cpu{mem, cfg};
+
+        cpu.set_pc(100);
+        cpu.set_sreg(0x01); // C=1
+        cpu.exec_brcs(encode_brcs(63));
+
+        REQUIRE(cpu.pc() == 226u);
+    }
+
+    TEST_CASE("BRCS - max negative offset (k=-64)", "[brcs]")
+    {
+        auto cfg = make_test_config();
+        MemoryMap mem{cfg};
+        AvrCpu    cpu{mem, cfg};
+
+        cpu.set_pc(228);
+        cpu.set_sreg(0x01); // C=1
+        cpu.exec_brcs(encode_brcs(-64));
+
+        REQUIRE(cpu.pc() == 100u);
+    }
+
+    TEST_CASE("BRCS - flags unaffected", "[brcs]")
+    {
+        auto cfg = make_test_config();
+        MemoryMap mem{cfg};
+        AvrCpu    cpu{mem, cfg};
+
+        constexpr u8 sentinel = 0b01010101;
+        cpu.set_sreg(sentinel);
+        cpu.set_pc(20);
+        cpu.exec_brcs(encode_brcs(3));
+
+        REQUIRE(cpu.sreg() == sentinel);
+    }
+
+    // ---------------------------------------------------------------------------
+    // BRCS — C-flag guard tests
+    // ---------------------------------------------------------------------------
+
+    TEST_CASE("BRCS - C=1: branch is taken", "[brcs]")
+    {
+        auto cfg = make_test_config();
+        MemoryMap mem{cfg};
+        AvrCpu    cpu{mem, cfg};
+
+        cpu.set_sreg(0x01); // C=1 — branch taken
+        cpu.set_pc(20);
+        cpu.exec_brcs(encode_brcs(3)); // +6 bytes
+
+        REQUIRE(cpu.pc() == 26u);
+    }
+
+    TEST_CASE("BRCS - C=0: branch is not taken, PC unchanged", "[brcs]")
+    {
+        auto cfg = make_test_config();
+        MemoryMap mem{cfg};
+        AvrCpu    cpu{mem, cfg};
+
+        cpu.set_sreg(0x00); // C=0 — branch not taken
+        cpu.set_pc(20);
+        cpu.exec_brcs(encode_brcs(3));
+
+        REQUIRE(cpu.pc() == 20u);
+    }
+
+    TEST_CASE("BRCS - C=0: negative offset also not taken", "[brcs]")
+    {
+        auto cfg = make_test_config();
+        MemoryMap mem{cfg};
+        AvrCpu    cpu{mem, cfg};
+
+        cpu.set_sreg(0x00); // C=0
+        cpu.set_pc(100);
+        cpu.exec_brcs(encode_brcs(-5));
+
+        REQUIRE(cpu.pc() == 100u);
+    }
+
+    TEST_CASE("BRCS - C=0 with other SREG bits set: branch still not taken", "[brcs]")
+    {
+        auto cfg = make_test_config();
+        MemoryMap mem{cfg};
+        AvrCpu    cpu{mem, cfg};
+
+        cpu.set_sreg(0xFE); // all flags set except C
+        cpu.set_pc(50);
+        cpu.exec_brcs(encode_brcs(10));
+
+        REQUIRE(cpu.pc() == 50u);
+    }
+
+    TEST_CASE("BRCS - only C bit matters: other flags set but C=1 still branches", "[brcs]")
+    {
+        auto cfg = make_test_config();
+        MemoryMap mem{cfg};
+        AvrCpu    cpu{mem, cfg};
+
+        cpu.set_sreg(0xFF); // all flags set, including C
+        cpu.set_pc(20);
+        cpu.exec_brcs(encode_brcs(3)); // +6 bytes
+
+        REQUIRE(cpu.pc() == 26u);
+    }
+
 TEST_CASE("BRNE - Z=1: branch is not taken, PC unchanged", "[brne]")
 {
     auto cfg = make_test_config();

@@ -2930,3 +2930,263 @@ TEST_CASE("COM - T and I flags preserved", "[com][alu]")
 
     REQUIRE((cpu.sreg() & 0xC0) == 0xC0);
 }
+
+// ---------------------------------------------------------------------------
+// SBIW  (1001 0111 KKdd KKKK)
+//
+// Operation : Rd+1:Rd ← Rd+1:Rd - K  (K = 0..63, d ∈ {24,26,28,30})
+// Cycles    : 2
+// Flags     : C, Z, N, V, S (N XOR V)
+//             H, T, I unaffected
+// ---------------------------------------------------------------------------
+
+// Encode SBIW Rd, K
+//   dd bits [5:4]: (d-24)/2  →  24→0, 26→1, 28→2, 30→3
+//   KK bits [7:6] and K bits [3:0]
+static u16 encode_sbiw(u8 d, u8 k)
+{
+    // 1001 0111 KKdd KKKK
+    u8 dd = (d - 24) >> 1;
+    return static_cast<u16>(0x9700
+        | ((k & 0x30) << 2)   // KK → bits [7:6]
+        | ((dd & 0x03) << 4)  // dd → bits [5:4]
+        | (k & 0x0F));        // K  → bits [3:0]
+}
+
+// Helper: set a 16-bit word into a register pair (lo, hi).
+static void set_word(AvrCpu& cpu, u8 lo_reg, u16 val)
+{
+    cpu.set_reg(lo_reg,     static_cast<u8>(val & 0xFF));
+    cpu.set_reg(lo_reg + 1, static_cast<u8>(val >> 8));
+}
+
+// Helper: read a 16-bit word from a register pair.
+static u16 get_word(AvrCpu& cpu, u8 lo_reg)
+{
+    return static_cast<u16>(cpu.reg(lo_reg) | (cpu.reg(lo_reg + 1) << 8));
+}
+
+TEST_CASE("SBIW - basic subtraction (R25:R24)", "[sbiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x0010);
+    cpu.exec_sbiw(encode_sbiw(24, 5));
+
+    REQUIRE(get_word(cpu, 24) == 0x000Bu);
+}
+
+TEST_CASE("SBIW - basic subtraction (R27:R26)", "[sbiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 26, 0x0100);
+    cpu.exec_sbiw(encode_sbiw(26, 1));
+
+    REQUIRE(get_word(cpu, 26) == 0x00FFu);
+}
+
+TEST_CASE("SBIW - basic subtraction (R29:R28)", "[sbiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 28, 0x0040);
+    cpu.exec_sbiw(encode_sbiw(28, 0x3F)); // subtract 63
+
+    REQUIRE(get_word(cpu, 28) == 0x0001u);
+}
+
+TEST_CASE("SBIW - basic subtraction (R31:R30)", "[sbiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 30, 0xABCD);
+    cpu.exec_sbiw(encode_sbiw(30, 0x0D));
+
+    REQUIRE(get_word(cpu, 30) == 0xABC0u);
+}
+
+TEST_CASE("SBIW - subtract 0 leaves word unchanged", "[sbiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x1234);
+    cpu.exec_sbiw(encode_sbiw(24, 0));
+
+    REQUIRE(get_word(cpu, 24) == 0x1234u);
+}
+
+TEST_CASE("SBIW - adjacent register pairs unchanged", "[sbiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x0010);
+    set_word(cpu, 26, 0xBEEF); // decoy
+    cpu.exec_sbiw(encode_sbiw(24, 4));
+
+    REQUIRE(get_word(cpu, 26) == 0xBEEFu); // untouched
+}
+
+TEST_CASE("SBIW - Z set when result is zero", "[sbiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x0007);
+    cpu.set_sreg(0x00);
+    cpu.exec_sbiw(encode_sbiw(24, 7));
+
+    REQUIRE(get_word(cpu, 24) == 0x0000u);
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+}
+
+TEST_CASE("SBIW - Z cleared when result is non-zero", "[sbiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x0008);
+    cpu.set_sreg(SREG_Z); // pre-set Z
+    cpu.exec_sbiw(encode_sbiw(24, 7));
+
+    REQUIRE((cpu.sreg() & SREG_Z) == 0);
+}
+
+TEST_CASE("SBIW - C (borrow) set when result wraps past zero", "[sbiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x0000 - 1 wraps to 0xFFFF
+    set_word(cpu, 24, 0x0000);
+    cpu.set_sreg(0x00);
+    cpu.exec_sbiw(encode_sbiw(24, 1));
+
+    REQUIRE(get_word(cpu, 24) == 0xFFFFu);
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+}
+
+TEST_CASE("SBIW - C cleared when no borrow", "[sbiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x0010);
+    cpu.set_sreg(SREG_C); // pre-set C
+    cpu.exec_sbiw(encode_sbiw(24, 1));
+
+    REQUIRE((cpu.sreg() & SREG_C) == 0);
+}
+
+TEST_CASE("SBIW - N set when result bit 15 is set", "[sbiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x0000 - 1 = 0xFFFF → bit 15 set
+    set_word(cpu, 24, 0x0000);
+    cpu.set_sreg(0x00);
+    cpu.exec_sbiw(encode_sbiw(24, 1));
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+}
+
+TEST_CASE("SBIW - N cleared when result bit 15 is clear", "[sbiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x00FF);
+    cpu.set_sreg(SREG_N); // pre-set N
+    cpu.exec_sbiw(encode_sbiw(24, 1));
+
+    REQUIRE((cpu.sreg() & SREG_N) == 0);
+}
+
+TEST_CASE("SBIW - V set on signed overflow (0x8000 - 1 = 0x7FFF)", "[sbiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x8000 (most-negative signed 16-bit) - 1 = 0x7FFF → overflow
+    set_word(cpu, 24, 0x8000);
+    cpu.set_sreg(0x00);
+    cpu.exec_sbiw(encode_sbiw(24, 1));
+
+    REQUIRE(get_word(cpu, 24) == 0x7FFFu);
+    REQUIRE((cpu.sreg() & SREG_V) != 0);
+}
+
+TEST_CASE("SBIW - V cleared when no signed overflow", "[sbiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x0010);
+    cpu.set_sreg(SREG_V); // pre-set V
+    cpu.exec_sbiw(encode_sbiw(24, 1));
+
+    REQUIRE((cpu.sreg() & SREG_V) == 0);
+}
+
+TEST_CASE("SBIW - S equals N XOR V", "[sbiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // 0x8000 - 1: N=0, V=1 → S=1
+    set_word(cpu, 24, 0x8000);
+    cpu.set_sreg(0x00);
+    cpu.exec_sbiw(encode_sbiw(24, 1));
+
+    u8 N = (cpu.sreg() & SREG_N) ? 1 : 0;
+    u8 V = (cpu.sreg() & SREG_V) ? 1 : 0;
+    u8 S = (cpu.sreg() & SREG_S) ? 1 : 0;
+    REQUIRE(S == (N ^ V));
+}
+
+TEST_CASE("SBIW - T and I flags preserved", "[sbiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xC0); // T and I set
+    set_word(cpu, 24, 0x0010);
+    cpu.exec_sbiw(encode_sbiw(24, 1));
+
+    REQUIRE((cpu.sreg() & 0xC0) == 0xC0);
+}
+
+TEST_CASE("SBIW - returns 2 cycles", "[sbiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x0010);
+    u8 cycles = cpu.exec_sbiw(encode_sbiw(24, 1));
+
+    REQUIRE(cycles == 2u);
+}

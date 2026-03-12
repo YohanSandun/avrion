@@ -2741,3 +2741,192 @@ TEST_CASE("CP - T and I flags preserved", "[cp][alu]")
 
     REQUIRE((cpu.sreg() & 0xC0) == 0xC0);
 }
+
+// ---------------------------------------------------------------------------
+// COM  (1001 010d dddd 0000)
+//
+// Operation : Rd ← 0xFF - Rd  (one's complement)
+// Flags     : C always set, Z = (result == 0), N = result[7], V cleared,
+//             S = N XOR V = N
+// ---------------------------------------------------------------------------
+
+static u16 encode_com(u8 d)
+{
+    // 1001 010d dddd 0000
+    return static_cast<u16>(0x9400 | ((d & 0x1F) << 4));
+}
+
+TEST_CASE("COM - result is one's complement of Rd", "[com][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(3, 0xAA);
+    cpu.exec_com(encode_com(3));
+
+    REQUIRE(cpu.reg(3) == 0x55u);
+}
+
+TEST_CASE("COM - 0x00 complements to 0xFF", "[com][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(5, 0x00);
+    cpu.exec_com(encode_com(5));
+
+    REQUIRE(cpu.reg(5) == 0xFFu);
+}
+
+TEST_CASE("COM - 0xFF complements to 0x00", "[com][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(7, 0xFF);
+    cpu.exec_com(encode_com(7));
+
+    REQUIRE(cpu.reg(7) == 0x00u);
+}
+
+TEST_CASE("COM - adjacent registers unchanged", "[com][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(9,  0x11); // decoy before
+    cpu.set_reg(10, 0x3C);
+    cpu.set_reg(11, 0x22); // decoy after
+    cpu.exec_com(encode_com(10));
+
+    REQUIRE(cpu.reg(9)  == 0x11u);
+    REQUIRE(cpu.reg(11) == 0x22u);
+}
+
+TEST_CASE("COM - C always set", "[com][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0x00); // C clear before
+    cpu.set_reg(2, 0x55);
+    cpu.exec_com(encode_com(2));
+
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+}
+
+TEST_CASE("COM - C set even when it was already set", "[com][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(SREG_C);
+    cpu.set_reg(2, 0x55);
+    cpu.exec_com(encode_com(2));
+
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+}
+
+TEST_CASE("COM - Z set when result is 0x00 (Rd was 0xFF)", "[com][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(4, 0xFF);
+    cpu.set_sreg(0x00);
+    cpu.exec_com(encode_com(4));
+
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+}
+
+TEST_CASE("COM - Z cleared when result is non-zero", "[com][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(4, 0xAA); // result = 0x55, non-zero
+    cpu.set_sreg(SREG_Z); // pre-set Z
+    cpu.exec_com(encode_com(4));
+
+    REQUIRE((cpu.sreg() & SREG_Z) == 0);
+}
+
+TEST_CASE("COM - N set when result bit 7 is set", "[com][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(6, 0x01); // result = 0xFE, bit 7 set
+    cpu.exec_com(encode_com(6));
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+}
+
+TEST_CASE("COM - N cleared when result bit 7 is clear", "[com][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(6, 0x80); // result = 0x7F, bit 7 clear
+    cpu.set_sreg(SREG_N); // pre-set N
+    cpu.exec_com(encode_com(6));
+
+    REQUIRE((cpu.sreg() & SREG_N) == 0);
+}
+
+TEST_CASE("COM - V always cleared", "[com][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(SREG_V); // pre-set V
+    cpu.set_reg(8, 0x55);
+    cpu.exec_com(encode_com(8));
+
+    REQUIRE((cpu.sreg() & SREG_V) == 0);
+}
+
+TEST_CASE("COM - S equals N (since V is always 0)", "[com][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // result = 0xFE (N=1) → S should be 1
+    cpu.set_reg(10, 0x01);
+    cpu.set_sreg(0x00);
+    cpu.exec_com(encode_com(10));
+
+    REQUIRE((cpu.sreg() & SREG_S) != 0);
+
+    // result = 0x7F (N=0) → S should be 0
+    cpu.set_reg(10, 0x80);
+    cpu.set_sreg(0x00);
+    cpu.exec_com(encode_com(10));
+
+    REQUIRE((cpu.sreg() & SREG_S) == 0);
+}
+
+TEST_CASE("COM - T and I flags preserved", "[com][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xC0); // T and I set
+    cpu.set_reg(12, 0x55);
+    cpu.exec_com(encode_com(12));
+
+    REQUIRE((cpu.sreg() & 0xC0) == 0xC0);
+}

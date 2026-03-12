@@ -338,4 +338,24 @@ u8 AvrCpu::exec_cp(u16 opcode) {
     return 1;
 }
 
+u8 AvrCpu::exec_com(u16 opcode) {
+    // COM
+    // 1001 010d dddd 0000
+    u8 d = (opcode >> 4) & 0x1F;
+    u8 rd = reg(d);
+    u8 result = 0xFF - rd;
+    set_reg(d, result);
+
+    u8 _sreg = sreg();
+    _sreg = (_sreg | 1); // C always set
+    _sreg = result == 0
+        ? (_sreg | 0x02) : (_sreg & ~0x02u); // Z set if result is zero
+    _sreg = (result & 0x80) != 0
+        ? (_sreg | 0x04) : (_sreg & ~0x04); // N set if bit 7 of result is set
+    _sreg = (_sreg & ~0x08u); // V cleared
+    _sreg |= (((_sreg & 0x04) >> 2) ^ ((_sreg & 0x08) >> 3)) << 4; // S = N XOR V
+    set_sreg(_sreg);
+    return 1;
+}
+
 } // namespace avrion

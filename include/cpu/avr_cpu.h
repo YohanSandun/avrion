@@ -5,6 +5,7 @@
 namespace avrion {
 
 class MemoryMap;
+class InterruptController;
 struct DeviceConfig;
 
 class AvrCpu {
@@ -13,6 +14,8 @@ public:
 
   void reset();
   u32 step_instruction();
+
+  void set_irq_controller(InterruptController* irq) { irq_ = irq; }
 
   // CpuSnapshot snapshot() const;
 
@@ -38,6 +41,7 @@ public:
   u8 exec_nop(u16 opcode);
   u8 exec_sei(u16 opcode);
   u8 exec_cli(u16 opcode);
+  u8 exec_reti(u16 opcode);
 
   // ALU
   u8 exec_eor(u16 opcode);
@@ -88,8 +92,10 @@ private:
   MemoryMap& mem_;
   const DeviceConfig& cfg_;
   CpuState st_;
+  InterruptController* irq_ = nullptr;
 
   u32 dispatch_and_exec(u16 opcode);
+  u32 service_interrupts();
 };
 
 } // namespace avrion

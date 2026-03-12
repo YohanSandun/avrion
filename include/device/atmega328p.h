@@ -56,6 +56,15 @@ namespace avrion
             // PORTD: PIND=0x29, DDRD=0x2A, PORTD=0x2B
             c.io_regions.push_back({ 0x0029, 3, "PORTD" });
 
+            // Timer0 registers (scattered across IO space)
+            // TIFR0 at 0x35 (1 byte) → periph register index 6 (TIFRx)
+            c.io_regions.push_back({ 0x0035, 1, "TIMER0", 6 });
+            // TCCR0A=0x44, TCCR0B=0x45, TCNT0=0x46, OCR0A=0x47, OCR0B=0x48
+            // → periph register indices 0–4 (TCCRxA through OCRxB)
+            c.io_regions.push_back({ 0x0044, 5, "TIMER0", 0 });
+            // TIMSK0 at 0x6E (1 byte) → periph register index 5 (TIMSKx)
+            c.io_regions.push_back({ 0x006E, 1, "TIMER0", 5 });
+
             return c;
         }
     };

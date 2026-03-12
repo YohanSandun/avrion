@@ -46,3 +46,21 @@ add_executable(test_instructions_misc
 target_link_libraries(test_instructions_misc PRIVATE avr_core Catch2::Catch2WithMain)
 
 catch_discover_tests(test_instructions_misc)
+
+# ---- Timer8 unit tests -----------------------------------------------------
+add_executable(test_timer8
+  test_timer8.cpp
+)
+
+target_link_libraries(test_timer8 PRIVATE avr_core Catch2::Catch2WithMain)
+
+catch_discover_tests(test_timer8)
+
+# ---- Interrupt unit tests ---------------------------------------------------
+add_executable(test_interrupts
+  test_interrupts.cpp
+)
+
+target_link_libraries(test_interrupts PRIVATE avr_core Catch2::Catch2WithMain)
+
+catch_discover_tests(test_interrupts)

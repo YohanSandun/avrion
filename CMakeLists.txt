@@ -49,6 +49,7 @@ add_library(avr_core STATIC
   src/device/atmega328p.cpp
   src/memory/memory_map.cpp
   src/periph/gpio.cpp
+  src/periph/timer8.cpp
 )
 
 target_include_directories(avr_core PUBLIC

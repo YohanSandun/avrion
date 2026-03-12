@@ -10,6 +10,7 @@ namespace avrion
     Device::Device(DeviceConfig cfg) : cfg_(std::move(cfg)), mem_(cfg_), cpu_(mem_, cfg_)
     {
         mem_.attach_cpu(&cpu_);
+        cpu_.set_irq_controller(&irq_);
     }
 
     void Device::reset()
@@ -48,6 +49,8 @@ namespace avrion
         if (id.empty())
             throw std::invalid_argument("add_peripheral: empty id");
 
+        p->set_irq_controller(&irq_);
+
         auto [it, inserted] = periphs_.emplace(id, std::move(p));
         if (!inserted)
         {
@@ -66,7 +69,7 @@ namespace avrion
             {
                 throw std::runtime_error("wire_from_config: missing peripheral for region id");
             }
-            mem_.map_peripheral(region.data_base, region.length, it->second.get());
+            mem_.map_peripheral(region.data_base, region.length, it->second.get(), region.periph_offset);
         }
     }
 

@@ -12,6 +12,12 @@ struct IoRegion {
   // A stable identifier so Device can wire the right peripheral
   // e.g., "PORTB", "TIMER0", "UART0"
   std::string_view id;
+
+  // Offset added to the region-relative offset before passing to peripheral.
+  // Allows mapping non-contiguous register groups to the same peripheral.
+  // E.g., if TIMSK0 is at 0x6E but should be seen as register index 5,
+  // set periph_offset = 5.
+  u16 periph_offset = 0;
 };
 
 struct DeviceConfig {

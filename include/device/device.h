@@ -1,5 +1,6 @@
 #pragma once
 #include "core/types.h"
+#include "core/interrupt_controller.h"
 #include "device/device_config.h"
 #include "memory/memory_map.h"
 #include "cpu/avr_cpu.h"
@@ -29,6 +30,9 @@ public:
   // Flash loading
   void load_flash(u32 flash_byte_addr, const u8* data, usize len);
 
+  InterruptController& irq_controller() { return irq_; }
+  const InterruptController& irq_controller() const { return irq_; }
+
 protected:
   // For derived devices: register peripherals and wire regions.
   // Typical usage: add_peripheral("PORTB", std::make_unique<GpioPort>());
@@ -42,6 +46,7 @@ protected:
 
 protected:
   DeviceConfig cfg_;
+  InterruptController irq_;
   MemoryMap mem_;
   AvrCpu cpu_;
 

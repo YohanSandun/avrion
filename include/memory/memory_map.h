@@ -27,12 +27,12 @@ public:
   bool is_sram(u16 data_addr) const;
   u8*  sram_ptr(u16 data_addr);
 
-  void map_peripheral(u16 data_base, u16 length, Peripheral* p);
+  void map_peripheral(u16 data_base, u16 length, Peripheral* p, u16 periph_offset = 0);
 
   const DeviceConfig& cfg() const { return cfg_; }
 
 private:
-  struct Mapping { u16 base; u16 len; Peripheral* p; };
+  struct Mapping { u16 base; u16 len; Peripheral* p; u16 periph_offset; };
 
   const DeviceConfig& cfg_;
   std::vector<u8> sram_;

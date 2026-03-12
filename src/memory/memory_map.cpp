@@ -1,6 +1,7 @@
 #include "memory/memory_map.h"
 #include "periph/peripheral.h"
 #include "cpu/avr_cpu.h"
+#include <iostream>
 
 namespace avrion
 {
@@ -134,9 +135,9 @@ namespace avrion
         return &sram_[data_addr - cfg_.sram_base];
     }
 
-    void MemoryMap::map_peripheral(u16 data_base, u16 length, Peripheral *p)
+    void MemoryMap::map_peripheral(u16 data_base, u16 length, Peripheral *p, u16 periph_offset)
     {
-        mappings_.push_back({data_base, length, p});
+        mappings_.push_back({data_base, length, p, periph_offset});
     }
 
     Peripheral *MemoryMap::find_peripheral(u16 data_addr, u16 &out_off)
@@ -145,10 +146,11 @@ namespace avrion
         {
             if (data_addr >= m.base && data_addr < m.base + m.len)
             {
-                out_off = data_addr - m.base;
+                out_off = (data_addr - m.base) + m.periph_offset;
                 return m.p;
             }
         }
+        std::cout << "Warning: access to unmapped data address 0x" << std::hex << data_addr << std::dec << std::endl;
         return nullptr;
     }
 

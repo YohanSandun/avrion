@@ -2517,3 +2517,227 @@ TEST_CASE("SBCI - signed overflow sets V and S accordingly", "[sbci][alu]")
     REQUIRE((cpu.sreg() & SREG_N) == 0);
     REQUIRE((cpu.sreg() & SREG_S) != 0);
 }
+
+// ---------------------------------------------------------------------------
+// CP  (0001 01rd dddd rrrr)
+//
+// Operation : Rd - Rr  (result discarded)
+// Flags     : C, Z, N, V, S (N XOR V), H
+// ---------------------------------------------------------------------------
+
+static u16 encode_cp(u8 d, u8 r)
+{
+    return static_cast<u16>(0x1400
+        | ((d & 0x1F) << 4)
+        | ((r & 0x10) << 5)
+        | (r & 0x0F));
+}
+
+TEST_CASE("CP - registers Rd and Rr are not modified", "[cp][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(2, 0x10);
+    cpu.set_reg(3, 0x05);
+    cpu.exec_cp(encode_cp(2, 3));
+
+    REQUIRE(cpu.reg(2) == 0x10); // Rd unchanged
+    REQUIRE(cpu.reg(3) == 0x05); // Rr unchanged
+}
+
+TEST_CASE("CP - Z flag set when Rd equals Rr", "[cp][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(4, 0xAB);
+    cpu.set_reg(5, 0xAB);
+    cpu.set_sreg(0x00);
+    cpu.exec_cp(encode_cp(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+}
+
+TEST_CASE("CP - Z flag cleared when Rd differs from Rr", "[cp][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(4, 0x10);
+    cpu.set_reg(5, 0x01);
+    cpu.set_sreg(SREG_Z); // pre-set Z
+    cpu.exec_cp(encode_cp(4, 5));
+
+    REQUIRE((cpu.sreg() & SREG_Z) == 0);
+}
+
+TEST_CASE("CP - C flag set when borrow (Rd < Rr unsigned)", "[cp][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(6, 0x00);
+    cpu.set_reg(7, 0x01); // 0x00 - 0x01 borrows
+    cpu.set_sreg(0x00);
+    cpu.exec_cp(encode_cp(6, 7));
+
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+}
+
+TEST_CASE("CP - C flag cleared when no borrow (Rd >= Rr unsigned)", "[cp][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(6, 0x05);
+    cpu.set_reg(7, 0x03);
+    cpu.set_sreg(SREG_C); // pre-set C
+    cpu.exec_cp(encode_cp(6, 7));
+
+    REQUIRE((cpu.sreg() & SREG_C) == 0);
+}
+
+TEST_CASE("CP - N flag set when result bit 7 is set", "[cp][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    // 0x00 - 0x01 = 0xFF (bit 7 set)
+    cpu.set_reg(8, 0x00);
+    cpu.set_reg(9, 0x01);
+    cpu.set_sreg(0x00);
+    cpu.exec_cp(encode_cp(8, 9));
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+}
+
+TEST_CASE("CP - N flag cleared when result bit 7 is clear", "[cp][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    // 0x05 - 0x03 = 0x02 (bit 7 clear)
+    cpu.set_reg(8, 0x05);
+    cpu.set_reg(9, 0x03);
+    cpu.set_sreg(SREG_N); // pre-set N
+    cpu.exec_cp(encode_cp(8, 9));
+
+    REQUIRE((cpu.sreg() & SREG_N) == 0);
+}
+
+TEST_CASE("CP - V flag set on signed overflow (0x80 - 0x01)", "[cp][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    // 0x80 - 0x01 = 0x7F: negative minus positive gives positive -> overflow
+    cpu.set_reg(10, 0x80);
+    cpu.set_reg(11, 0x01);
+    cpu.set_sreg(0x00);
+    cpu.exec_cp(encode_cp(10, 11));
+
+    REQUIRE((cpu.sreg() & SREG_V) != 0);
+}
+
+TEST_CASE("CP - V flag cleared when no signed overflow", "[cp][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    // 0x05 - 0x03 = 0x02: no overflow
+    cpu.set_reg(10, 0x05);
+    cpu.set_reg(11, 0x03);
+    cpu.set_sreg(SREG_V); // pre-set V
+    cpu.exec_cp(encode_cp(10, 11));
+
+    REQUIRE((cpu.sreg() & SREG_V) == 0);
+}
+
+TEST_CASE("CP - S equals N XOR V", "[cp][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    // 0x80 - 0x01 = 0x7F: N=0, V=1 -> S=1
+    cpu.set_reg(12, 0x80);
+    cpu.set_reg(13, 0x01);
+    cpu.set_sreg(0x00);
+    cpu.exec_cp(encode_cp(12, 13));
+
+    u8 N = (cpu.sreg() & SREG_N) != 0 ? 1 : 0;
+    u8 V = (cpu.sreg() & SREG_V) != 0 ? 1 : 0;
+    u8 S = (cpu.sreg() & SREG_S) != 0 ? 1 : 0;
+    REQUIRE(S == (N ^ V));
+}
+
+TEST_CASE("CP - H flag set when borrow from bit 3", "[cp][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    // 0x00 - 0x08 = 0xF8: borrow from bit 3 into bit 4
+    cpu.set_reg(14, 0x00);
+    cpu.set_reg(15, 0x08);
+    cpu.set_sreg(0x00);
+    cpu.exec_cp(encode_cp(14, 15));
+
+    REQUIRE((cpu.sreg() & SREG_H) != 0);
+}
+
+TEST_CASE("CP - H flag cleared when no borrow from bit 3", "[cp][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    // 0x08 - 0x01 = 0x07: rd3=1, rr3=0, r3=0 -> H formula evaluates to 0
+    cpu.set_reg(14, 0x08);
+    cpu.set_reg(15, 0x01);
+    cpu.set_sreg(SREG_H); // pre-set H
+    cpu.exec_cp(encode_cp(14, 15));
+
+    REQUIRE((cpu.sreg() & SREG_H) == 0);
+}
+
+TEST_CASE("CP - self compare (Rd == Rr) sets only Z", "[cp][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_reg(16, 0x42);
+    cpu.set_sreg(0x00);
+    cpu.exec_cp(encode_cp(16, 16));
+
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+    REQUIRE((cpu.sreg() & SREG_C) == 0);
+    REQUIRE((cpu.sreg() & SREG_N) == 0);
+    REQUIRE((cpu.sreg() & SREG_V) == 0);
+    REQUIRE((cpu.sreg() & SREG_S) == 0);
+}
+
+TEST_CASE("CP - T and I flags preserved", "[cp][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu cpu{mem, cfg};
+
+    cpu.set_sreg(0xC0); // T and I set
+    cpu.set_reg(18, 0x10);
+    cpu.set_reg(19, 0x01);
+    cpu.exec_cp(encode_cp(18, 19));
+
+    REQUIRE((cpu.sreg() & 0xC0) == 0xC0);
+}

@@ -1768,6 +1768,204 @@ TEST_CASE("PUSH - flags unaffected", "[push][data_transfer]")
     REQUIRE(cpu.sreg() == sentinel);
 }
 
+// ---------------------------------------------------------------------------
+// POP  (1001 000d dddd 1111)
+//
+// Operation : Rd ← mem[SP]; SP ← SP + 1
+// Cycles    : 2
+// Flags     : none affected
+//
+// Config: make_sreg_config() has sram_size=2*1024, sram_base=0x0100.
+// Default SP = sram_size - 1 = 2047 = 0x07FF.
+// After one PUSH, SP = 0x07FE and the pushed byte lives at 0x07FE.
+// ---------------------------------------------------------------------------
+
+static u16 encode_pop(u8 d)
+{
+    // 1001 000d dddd 1111
+    return static_cast<u16>(0x900F | ((d & 0x1F) << 4));
+}
+
+TEST_CASE("POP - value from stack loaded into Rd", "[pop][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(5, 0xAB);
+    cpu.exec_push(encode_push(5));   // SP → 0x07FE, mem[0x07FE] = 0xAB
+
+    cpu.set_reg(7, 0x00);            // clear destination first
+    cpu.exec_pop(encode_pop(7));     // Rd=7 ← mem[0x07FE] = 0xAB
+
+    REQUIRE(cpu.reg(7) == 0xABu);
+}
+
+TEST_CASE("POP - SP is incremented after pop", "[pop][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(10, 0x55);
+    cpu.exec_push(encode_push(10));               // SP → PUSH_INITIAL_SP - 1
+
+    cpu.exec_pop(encode_pop(10));                  // SP → PUSH_INITIAL_SP
+
+    REQUIRE(cpu.sp() == PUSH_INITIAL_SP);
+}
+
+TEST_CASE("POP - destination (R0) receives popped value", "[pop][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(1, 0x11);
+    cpu.exec_push(encode_push(1));
+
+    cpu.exec_pop(encode_pop(0));
+
+    REQUIRE(cpu.reg(0) == 0x11u);
+}
+
+TEST_CASE("POP - destination (R31) receives popped value", "[pop][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(16, 0xCC);
+    cpu.exec_push(encode_push(16));
+
+    cpu.exec_pop(encode_pop(31));
+
+    REQUIRE(cpu.reg(31) == 0xCCu);
+}
+
+TEST_CASE("POP - zero value popped correctly", "[pop][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(2, 0x00);
+    cpu.exec_push(encode_push(2));
+
+    cpu.set_reg(3, 0xFF); // ensure it gets overwritten
+    cpu.exec_pop(encode_pop(3));
+
+    REQUIRE(cpu.reg(3) == 0x00u);
+}
+
+TEST_CASE("POP - 0xFF value popped correctly", "[pop][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(4, 0xFF);
+    cpu.exec_push(encode_push(4));
+
+    cpu.set_reg(5, 0x00);
+    cpu.exec_pop(encode_pop(5));
+
+    REQUIRE(cpu.reg(5) == 0xFFu);
+}
+
+TEST_CASE("POP - adjacent registers unchanged", "[pop][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(9,  0x77); // decoy before
+    cpu.set_reg(10, 0x00); // destination
+    cpu.set_reg(11, 0x88); // decoy after
+
+    cpu.set_reg(6, 0x42);
+    cpu.exec_push(encode_push(6));
+    cpu.exec_pop(encode_pop(10));
+
+    REQUIRE(cpu.reg(9)  == 0x77u);
+    REQUIRE(cpu.reg(11) == 0x88u);
+}
+
+TEST_CASE("POP - round-trip push/pop restores register value", "[pop][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(12, 0xA5);
+    cpu.exec_push(encode_push(12));
+    cpu.set_reg(12, 0x00);  // clobber source
+    cpu.exec_pop(encode_pop(12));
+
+    REQUIRE(cpu.reg(12) == 0xA5u);
+    REQUIRE(cpu.sp() == PUSH_INITIAL_SP);
+}
+
+TEST_CASE("POP - LIFO order: two pushes popped in reverse", "[pop][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(0, 0x11);
+    cpu.set_reg(1, 0x22);
+    cpu.exec_push(encode_push(0)); // pushed first → deeper
+    cpu.exec_push(encode_push(1)); // pushed second → on top
+
+    cpu.exec_pop(encode_pop(20)); // first pop gets 0x22 (top)
+    cpu.exec_pop(encode_pop(21)); // second pop gets 0x11 (bottom)
+
+    REQUIRE(cpu.reg(20) == 0x22u);
+    REQUIRE(cpu.reg(21) == 0x11u);
+    REQUIRE(cpu.sp() == PUSH_INITIAL_SP);
+}
+
+TEST_CASE("POP - flags unaffected", "[pop][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(14, 0x99);
+    cpu.exec_push(encode_push(14));
+
+    constexpr u8 sentinel = 0b11001010;
+    cpu.set_sreg(sentinel);
+    cpu.exec_pop(encode_pop(14));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+TEST_CASE("POP - returns 2 cycles", "[pop][data_transfer]")
+{
+    auto cfg = make_sreg_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(8, 0x01);
+    cpu.exec_push(encode_push(8));
+
+    u8 cycles = cpu.exec_pop(encode_pop(8));
+
+    REQUIRE(cycles == 2u);
+}
+
 TEST_CASE("LPM - Z is not modified", "[lpm][data_transfer]")
 {
     auto cfg = make_lpm_config();

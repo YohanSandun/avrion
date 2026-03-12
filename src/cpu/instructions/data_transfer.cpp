@@ -161,4 +161,12 @@ u8 AvrCpu::exec_mov(u16 opcode) {
     return 1;
 }
 
+u8 AvrCpu::exec_pop(u16 opcode) {
+    // POP
+    // 1001 001d dddd 1111
+    u8 d = (opcode & 0x01F0) >> 4;
+    set_reg(d, mem_.read8(st_.sp++));
+    return 2;
+}
+
 } // namespace avrion

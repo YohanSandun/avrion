@@ -133,4 +133,19 @@ u8 AvrCpu::exec_brcs(u16 opcode) {
     return 2;
 }
 
+u8 AvrCpu::exec_brcc(u16 opcode) {
+    // BRCC
+    // 1111 01kk kkkk k000
+    if (sreg() & 0x01) { // C flag set → not taken
+        return 1;
+    }
+    
+    u16 k = (opcode & 0x03F8) >> 3;
+    if (k & 0x0040) {
+        k |= 0xFF80;
+    }
+    set_pc(pc() + static_cast<u32>(static_cast<int16_t>(k) << 1));
+    return 2;
+}
+
 } // namespace avrion

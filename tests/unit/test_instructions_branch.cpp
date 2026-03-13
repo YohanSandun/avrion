@@ -1361,3 +1361,193 @@ TEST_CASE("CALL+RET round-trip: nested calls restore SP correctly", "[call][ret]
 
     REQUIRE(cpu.sp() == sp_initial);
 }
+
+// ---------------------------------------------------------------------------
+// BRCC  (1111 01kk kkkk k000)
+//
+// Branch if Carry Clear. Relative branch with signed 7-bit word offset k.
+// Branches when C==0; falls through when C==1.
+// PC on entry is already advanced past the opcode (instruction_address + 2).
+// Flags: none affected.
+// ---------------------------------------------------------------------------
+
+static u16 encode_brcc(int8_t k)
+{
+    // 1111 01kk kkkk k000 — k occupies bits 9:3
+    return static_cast<u16>(0xF400 | ((static_cast<u16>(k) & 0x7F) << 3));
+}
+
+TEST_CASE("BRCC - C=0: branch taken, forward offset", "[brcc]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0x00); // C=0 — branch taken
+    cpu.set_pc(20);
+    cpu.exec_brcc(encode_brcc(3)); // k=+3 words → +6 bytes
+
+    REQUIRE(cpu.pc() == 26u);
+}
+
+TEST_CASE("BRCC - C=1: branch not taken, PC unchanged", "[brcc]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0x01); // C=1 — branch not taken
+    cpu.set_pc(20);
+    cpu.exec_brcc(encode_brcc(3));
+
+    REQUIRE(cpu.pc() == 20u);
+}
+
+TEST_CASE("BRCC - C=0: backward branch (negative offset)", "[brcc]")
+{
+    // PC=100, k=-5 → target = 100 + (-5)*2 = 90
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0x00); // C=0
+    cpu.set_pc(100);
+    cpu.exec_brcc(encode_brcc(-5));
+
+    REQUIRE(cpu.pc() == 90u);
+}
+
+TEST_CASE("BRCC - C=0: zero offset stays at current PC", "[brcc]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0x00); // C=0
+    cpu.set_pc(50);
+    cpu.exec_brcc(encode_brcc(0));
+
+    REQUIRE(cpu.pc() == 50u);
+}
+
+TEST_CASE("BRCC - C=0: self-loop (k=-1 jumps back to own address)", "[brcc]")
+{
+    // Instruction at byte 0; PC is already 2 when exec fires.
+    // k=-1 → target = 2 + (-1)*2 = 0
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0x00); // C=0
+    cpu.set_pc(2);
+    cpu.exec_brcc(encode_brcc(-1));
+
+    REQUIRE(cpu.pc() == 0u);
+}
+
+TEST_CASE("BRCC - C=0: max positive offset (k=+63)", "[brcc]")
+{
+    // k=63 → offset_bytes = +126
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0x00); // C=0
+    cpu.set_pc(100);
+    cpu.exec_brcc(encode_brcc(63));
+
+    REQUIRE(cpu.pc() == 226u);
+}
+
+TEST_CASE("BRCC - C=0: max negative offset (k=-64)", "[brcc]")
+{
+    // k=-64 → offset_bytes = -128; start at 228 so target = 100
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0x00); // C=0
+    cpu.set_pc(228);
+    cpu.exec_brcc(encode_brcc(-64));
+
+    REQUIRE(cpu.pc() == 100u);
+}
+
+TEST_CASE("BRCC - C=1: negative offset also not taken", "[brcc]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0x01); // C=1
+    cpu.set_pc(100);
+    cpu.exec_brcc(encode_brcc(-5));
+
+    REQUIRE(cpu.pc() == 100u);
+}
+
+TEST_CASE("BRCC - C=1 with other SREG bits set: branch still not taken", "[brcc]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFF); // all flags set, including C
+    cpu.set_pc(50);
+    cpu.exec_brcc(encode_brcc(10));
+
+    REQUIRE(cpu.pc() == 50u);
+}
+
+TEST_CASE("BRCC - only C bit matters: other flags set but C=0 still branches", "[brcc]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xFE); // all flags set except C (bit 0 = 0)
+    cpu.set_pc(20);
+    cpu.exec_brcc(encode_brcc(3)); // +6 bytes
+
+    REQUIRE(cpu.pc() == 26u);
+}
+
+TEST_CASE("BRCC - flags unaffected", "[brcc]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    constexpr u8 sentinel = 0b10100100; // C=0, others set
+    cpu.set_sreg(sentinel);
+    cpu.set_pc(20);
+    cpu.exec_brcc(encode_brcc(3));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+TEST_CASE("BRCC - cycle count taken: returns 2", "[brcc]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0x00); // C=0 — branch taken
+    cpu.set_pc(20);
+    u8 cycles = cpu.exec_brcc(encode_brcc(3));
+
+    REQUIRE(cycles == 2);
+}
+
+TEST_CASE("BRCC - cycle count not taken: returns 1", "[brcc]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0x01); // C=1 — branch not taken
+    cpu.set_pc(20);
+    u8 cycles = cpu.exec_brcc(encode_brcc(3));
+
+    REQUIRE(cycles == 1);
+}

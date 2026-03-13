@@ -5,6 +5,7 @@
 #include "memory/memory_map.h"
 #include "cpu/avr_cpu.h"
 #include "periph/peripheral.h"
+#include <atomic>
 #include <memory>
 #include <unordered_map>
 #include <string_view>
@@ -20,6 +21,12 @@ public:
 
   void reset();
   void run_cycles(u64 cycles);
+  // Runs the CPU indefinitely at the clock speed set in DeviceConfig::clock_hz,
+  // throttling with sleep so emulated time tracks wall-clock time.
+  // Returns when stop becomes true (e.g. on SIGINT).
+  void run_realtime(const std::atomic<bool>& stop);
+
+  u64 total_cycles() const { return total_cycles_; }
 
   // CpuSnapshot cpu_snapshot() const { return cpu_.snapshot(); }
 
@@ -32,6 +39,16 @@ public:
 
   InterruptController& irq_controller() { return irq_; }
   const InterruptController& irq_controller() const { return irq_; }
+
+  // Returns a pointer to the peripheral registered under id, cast to T*.
+  // Returns nullptr if not found or wrong type.
+  template<typename T>
+  T* get_peripheral(std::string_view id)
+  {
+      auto it = periphs_.find(id);
+      if (it == periphs_.end()) return nullptr;
+      return dynamic_cast<T*>(it->second.get());
+  }
 
 protected:
   // For derived devices: register peripherals and wire regions.
@@ -54,6 +71,8 @@ protected:
 
   // Optional: keep a stable ordered list for ticking
   std::vector<Peripheral*> tick_list_;
+
+  u64 total_cycles_ = 0;
 };
 
 } // namespace avrion

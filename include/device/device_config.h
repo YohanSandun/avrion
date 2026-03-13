@@ -25,6 +25,13 @@ struct DeviceConfig {
 
   bool has_22_bit_pc = false; // e.g., AVR8 has 16-bit PC, AVR32 has 22-bit PC
 
+  u32 clock_hz = 0;           // CPU clock frequency in Hz (e.g. 16000000 for 16 MHz)
+
+  // Bytes per interrupt vector table entry.
+  // 2 = RJMP (devices with <= 8 KB flash).
+  // 4 = JMP  (devices with >  8 KB flash, e.g. ATmega328P).
+  u8 interrupt_vector_bytes = 4;
+
   // Flash (program memory)
   u32 flash_size_bytes = 0;
 

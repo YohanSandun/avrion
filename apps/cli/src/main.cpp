@@ -1,11 +1,21 @@
 #include <iostream>
+#include <cstdio>
 #include <exception>
+#include <csignal>
+#include <atomic>
 #include "device/atmega328p.h"
+#include "periph/gpio.h"
 #include "intel_hex_decoder.h"
 
 #ifndef BLINK_HEX_PATH
 #  define BLINK_HEX_PATH "tests/data/blink.hex"
 #endif
+
+static std::atomic<bool> g_stop{false};
+
+static void handle_sigint(int) {
+    g_stop.store(true);
+}
 
 int main() {
     try {
@@ -15,9 +25,39 @@ int main() {
         dev.load_flash(0, flash_data.data(), flash_data.size());
         dev.reset();
 
-        dev.run_cycles(1000000);
+        // Print a line to stdout whenever any GPIO output pin changes state.
+        // Shows emulated time and cycle delta so timing bugs are immediately visible.
+        auto wire_trace = [&](const char* name) {
+            auto* port = dev.get_peripheral<avrion::GpioPort>(name);
+            if (!port) return;
+            port->set_on_change([name, &dev, last_cycles = uint64_t{0}](uint8_t old_p, uint8_t new_p) mutable {
+                const uint8_t changed = old_p ^ new_p;
+                for (int i = 7; i >= 0; --i) {
+                    if (changed & (1u << i)) {
+                        const bool high = (new_p >> i) & 1;
+                        uint64_t cyc      = dev.total_cycles();
+                        uint64_t delta    = cyc - last_cycles;
+                        double   emu_ms   = static_cast<double>(cyc) * 1000.0
+                                           / dev.config().clock_hz;
+                        std::printf("[%9.3fms | delta %llu cy] %s%d: %s\n",
+                                    emu_ms, (unsigned long long)delta,
+                                    name, i, high ? "HIGH" : "LOW");
+                        last_cycles = cyc;
+                    }
+                }
+                std::fflush(stdout);
+            });
+        };
+        wire_trace("PORTB");
+        wire_trace("PORTC");
+        wire_trace("PORTD");
 
-        std::cout << "Program loaded into flash." << std::endl;
+        std::signal(SIGINT, handle_sigint);
+        std::cout << "Running at " << dev.config().clock_hz / 1'000'000 << " MHz... Press Ctrl+C to stop." << std::endl;
+
+        dev.run_realtime(g_stop);
+
+        std::cout << "\nStopped." << std::endl;
         return 0;
     } catch (const std::exception& ex) {
         std::cerr << "avr_cli error: " << ex.what() << std::endl;

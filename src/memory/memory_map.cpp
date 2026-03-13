@@ -1,7 +1,6 @@
 #include "memory/memory_map.h"
 #include "periph/peripheral.h"
 #include "cpu/avr_cpu.h"
-#include <iostream>
 
 namespace avrion
 {
@@ -150,7 +149,7 @@ namespace avrion
                 return m.p;
             }
         }
-        std::cout << "Warning: access to unmapped data address 0x" << std::hex << data_addr << std::dec << std::endl;
+        // std::cout << "Warning: access to unmapped data address 0x" << std::hex << data_addr << std::dec << std::endl;
         return nullptr;
     }
 

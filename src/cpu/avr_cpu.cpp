@@ -100,15 +100,8 @@ namespace avrion
         mem_.write8(--st_.sp, ret & 0xFF);
 
         // Jump to interrupt vector address.
-        // Each vector is 2 bytes (1 instruction word) apart on ATmega328P.
-        // Vector byte address = vector_number * 2 (for 16-bit PC devices)
-        // or vector_number * 4 (for 22-bit PC devices with 4-byte vectors).
-        u32 vector_byte_addr;
-        if (cfg_.has_22_bit_pc) {
-            vector_byte_addr = static_cast<u32>(vec) * 4;
-        } else {
-            vector_byte_addr = static_cast<u32>(vec) * 2;
-        }
+        // Entry size is device-specific: 4 bytes (JMP) for >8KB flash, 2 bytes (RJMP) for <=8KB.
+        u32 vector_byte_addr = static_cast<u32>(vec) * cfg_.interrupt_vector_bytes;
         st_.pc = vector_byte_addr;
 
         return cfg_.has_22_bit_pc ? 5 : 4;

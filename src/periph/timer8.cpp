@@ -1,6 +1,10 @@
 #include "periph/timer8.h"
+#include <cstdio>
 
 namespace avrion {
+
+static unsigned s_tov_count = 0; // debug: count Timer0 OVF events
+
 
 Timer8::Timer8(Timer8Vectors vectors)
     : vectors_(vectors) {}
@@ -106,16 +110,19 @@ void Timer8::advance_timer(u32 timer_ticks) {
           tifr_ |= kTOV;
         }
       } else if (mode == WaveformMode::CTC) {
-        // Clear on compare match with OCRxA
+        // Clear on compare match with OCRxA, overflow at TOP
         if (tcnt_ > top) {
           tcnt_ = 0;
           tifr_ |= kTOV;
         }
       } else {
-        // Fast PWM: overflow at TOP
-        if (tcnt_ > top) {
-          tcnt_ = 0;
-          tifr_ |= kTOV;
+        // Fast PWM: TOP=0xFF wraps naturally as u8 (0xFF->0x00),
+        // so detect overflow the same way as Normal mode.
+        // FastPWM_OCRA uses OCRxA as top so the > check applies.
+        if (mode == WaveformMode::FastPWM) {
+          if (tcnt_ == 0) { tifr_ |= kTOV; } // u8 wrapped 0xFF->0x00
+        } else {
+          if (tcnt_ > top) { tcnt_ = 0; tifr_ |= kTOV; } // FastPWM_OCRA
         }
       }
       break;
@@ -158,6 +165,13 @@ void Timer8::check_interrupts() {
 
   // Overflow interrupt
   if ((timsk_ & kTOIE) && (tifr_ & kTOV)) {
+    ++s_tov_count;
+    if (s_tov_count <= 5) {
+      std::fprintf(stderr, "[timer] TOV #%u fired: tcnt=%u tccra=%02X tccrb=%02X timsk=%02X\n",
+                   s_tov_count, tcnt_, tccra_, tccrb_, timsk_);
+    } else if (s_tov_count == 6) {
+      std::fprintf(stderr, "[timer] TOV firing normally (suppressing further logs)\n");
+    }
     irq_->raise(vectors_.ovf);
     tifr_ &= static_cast<u8>(~kTOV); // auto-clear on raise
   }

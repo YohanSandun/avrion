@@ -55,13 +55,29 @@ std::array<PinState, 8> GpioPort::snapshot() const
     return result;
 }
 
+void GpioPort::set_on_change(std::function<void(u8, u8)> cb)
+{
+    on_change_ = std::move(cb);
+}
+
 void GpioPort::recompute_pins()
 {
     // Output pins: driven by PORT register
     // Input pins: driven by external signal (ext_in_), with optional pull-up
     const u8 output_levels = ddr_ & port_;
     const u8 input_levels  = static_cast<u8>(~ddr_) & ext_in_;
-    pin_latched_ = output_levels | input_levels;
+    const u8 new_pins = output_levels | input_levels;
+    if (new_pins != pin_latched_)
+    {
+        const u8 old_pins = pin_latched_;
+        pin_latched_ = new_pins;
+        if (on_change_)
+            on_change_(old_pins, new_pins);
+    }
+    else
+    {
+        pin_latched_ = new_pins;
+    }
 }
 
 } // namespace avrion

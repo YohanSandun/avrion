@@ -3190,3 +3190,339 @@ TEST_CASE("SBIW - returns 2 cycles", "[sbiw][alu]")
 
     REQUIRE(cycles == 2u);
 }
+
+// ---------------------------------------------------------------------------
+// ADIW  (1001 0110 KKdd KKKK)
+//
+// Operation : Rd+1:Rd ← Rd+1:Rd + K  (K = 0..63, d in {24,26,28,30})
+// Flags     : C = ~R15 & Rdh7
+//             Z = (result == 0)
+//             N = R15
+//             V = R15 & ~Rdh7
+//             S = N XOR V
+//             H, T, I unaffected
+// ---------------------------------------------------------------------------
+
+// Encode ADIW Rd, K
+//   dd bits: (d-24)/2  → 24→0, 26→1, 28→2, 30→3
+static u16 encode_adiw(u8 d, u8 k)
+{
+    // 1001 0110 KKdd KKKK
+    u8 dd = (d - 24) >> 1;
+    return static_cast<u16>(0x9600
+        | ((k & 0x30) << 2)   // KK → bits [7:6]
+        | ((dd & 0x03) << 4)  // dd → bits [5:4]
+        | (k & 0x0F));        // K  → bits [3:0]
+}
+
+TEST_CASE("ADIW - basic addition (R25:R24)", "[adiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x0010);
+    cpu.exec_adiw(encode_adiw(24, 5));
+
+    REQUIRE(get_word(cpu, 24) == 0x0015u);
+}
+
+TEST_CASE("ADIW - uses R27:R26 (X register)", "[adiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 26, 0x0100);
+    cpu.exec_adiw(encode_adiw(26, 1));
+
+    REQUIRE(get_word(cpu, 26) == 0x0101u);
+}
+
+TEST_CASE("ADIW - uses R29:R28 (Y register)", "[adiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 28, 0x0040);
+    cpu.exec_adiw(encode_adiw(28, 0x3F)); // add 63
+
+    REQUIRE(get_word(cpu, 28) == 0x007Fu);
+}
+
+TEST_CASE("ADIW - uses R31:R30 (Z register)", "[adiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 30, 0xABCD);
+    cpu.exec_adiw(encode_adiw(30, 0x0D));
+
+    REQUIRE(get_word(cpu, 30) == 0xABDAu);
+}
+
+TEST_CASE("ADIW - max K value (63) applied correctly", "[adiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x1234);
+    cpu.exec_adiw(encode_adiw(24, 63));
+
+    REQUIRE(get_word(cpu, 24) == 0x1273u);
+}
+
+TEST_CASE("ADIW - K=0 leaves word unchanged", "[adiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0xBEEF);
+    cpu.exec_adiw(encode_adiw(24, 0));
+
+    REQUIRE(get_word(cpu, 24) == 0xBEEFu);
+}
+
+TEST_CASE("ADIW - carry into high byte", "[adiw][alu]")
+{
+    // 0x00FF + 1 = 0x0100 (low byte wraps, carry into high byte)
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x00FF);
+    cpu.exec_adiw(encode_adiw(24, 1));
+
+    REQUIRE(get_word(cpu, 24) == 0x0100u);
+}
+
+TEST_CASE("ADIW - 16-bit overflow wraps to zero, Z flag set", "[adiw][alu]")
+{
+    // 0xFFFF + 1 = 0x0000 (with wrap)
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0xFFFF);
+    cpu.exec_adiw(encode_adiw(24, 1));
+
+    REQUIRE(get_word(cpu, 24) == 0x0000u);
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+}
+
+// ---------------------------------------------------------------------------
+// ADIW — Z flag
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ADIW - Z set when result is zero", "[adiw][alu]")
+{
+    // 0xFFFF + 1 wraps to 0
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0xFFFF);
+    cpu.exec_adiw(encode_adiw(24, 1));
+
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+}
+
+TEST_CASE("ADIW - Z cleared when result is non-zero", "[adiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(SREG_Z); // pre-set Z
+    set_word(cpu, 24, 0x0001);
+    cpu.exec_adiw(encode_adiw(24, 1));
+
+    REQUIRE((cpu.sreg() & SREG_Z) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// ADIW — N flag
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ADIW - N set when result bit 15 is set", "[adiw][alu]")
+{
+    // 0x7FFF + 1 = 0x8000 → N=1
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x7FFF);
+    cpu.exec_adiw(encode_adiw(24, 1));
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+}
+
+TEST_CASE("ADIW - N cleared when result bit 15 is clear", "[adiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(SREG_N); // pre-set N
+    set_word(cpu, 24, 0x0001);
+    cpu.exec_adiw(encode_adiw(24, 1));
+
+    REQUIRE((cpu.sreg() & SREG_N) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// ADIW — V flag (overflow: unsigned 16-bit → signed overflow into bit 15)
+// V = result[15] & ~Rdh[7]  (high bit of result set, but was clear before)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ADIW - V set on signed overflow (0x7FFF + 1)", "[adiw][alu]")
+{
+    // 0x7FFF + 1 = 0x8000: Rdh was 0x7F (bit7=0), result high byte 0x80 (bit15=1) → V=1
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x7FFF);
+    cpu.exec_adiw(encode_adiw(24, 1));
+
+    REQUIRE((cpu.sreg() & SREG_V) != 0);
+}
+
+TEST_CASE("ADIW - V cleared for normal positive addition", "[adiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(SREG_V); // pre-set V
+    set_word(cpu, 24, 0x0010);
+    cpu.exec_adiw(encode_adiw(24, 5));
+
+    REQUIRE((cpu.sreg() & SREG_V) == 0);
+}
+
+TEST_CASE("ADIW - V cleared when high byte remains negative (0x8000 + 1)", "[adiw][alu]")
+{
+    // Rdh bit7=1, result bit15=1 → V = result[15] & ~Rdh[7] = 1 & 0 = 0
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x8000);
+    cpu.exec_adiw(encode_adiw(24, 1));
+
+    REQUIRE((cpu.sreg() & SREG_V) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// ADIW — C flag (carry out of bit 15)
+// C = ~result[15] & Rdh[7]  (result went from negative to non-negative: wraparound)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ADIW - C set on unsigned overflow (0xFFFF + 1 wraps)", "[adiw][alu]")
+{
+    // Rdh = 0xFF (bit7=1), result = 0x0000 (bit15=0) → C = ~0 & 1 = 1
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0xFFFF);
+    cpu.exec_adiw(encode_adiw(24, 1));
+
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+}
+
+TEST_CASE("ADIW - C cleared for normal addition", "[adiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(SREG_C); // pre-set C
+    set_word(cpu, 24, 0x0010);
+    cpu.exec_adiw(encode_adiw(24, 5));
+
+    REQUIRE((cpu.sreg() & SREG_C) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// ADIW — S flag (S = N XOR V)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ADIW - S = N XOR V: both clear → S clear", "[adiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x0001);
+    cpu.exec_adiw(encode_adiw(24, 1)); // result=0x0002, N=0, V=0
+
+    REQUIRE((cpu.sreg() & SREG_S) == 0);
+}
+
+TEST_CASE("ADIW - S = N XOR V: N=1, V=0 → S=1", "[adiw][alu]")
+{
+    // 0x8000 + 1 = 0x8001: N=1, V=0 (Rdh bit7 was 1) → S=1
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x8000);
+    cpu.exec_adiw(encode_adiw(24, 1));
+
+    u8 N = (cpu.sreg() & SREG_N) ? 1 : 0;
+    u8 V = (cpu.sreg() & SREG_V) ? 1 : 0;
+    u8 S = (cpu.sreg() & SREG_S) ? 1 : 0;
+    REQUIRE(S == (N ^ V));
+}
+
+TEST_CASE("ADIW - S = N XOR V: N=1, V=1 → S=0 (0x7FFF+1)", "[adiw][alu]")
+{
+    // 0x7FFF + 1 = 0x8000: N=1, V=1 → S=0
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x7FFF);
+    cpu.exec_adiw(encode_adiw(24, 1));
+
+    u8 N = (cpu.sreg() & SREG_N) ? 1 : 0;
+    u8 V = (cpu.sreg() & SREG_V) ? 1 : 0;
+    u8 S = (cpu.sreg() & SREG_S) ? 1 : 0;
+    REQUIRE(S == (N ^ V));
+    REQUIRE(S == 0);
+}
+
+// ---------------------------------------------------------------------------
+// ADIW — unaffected bits
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ADIW - H, T, I flags are unaffected", "[adiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0xC0); // T=1, I=1
+    set_word(cpu, 24, 0x0010);
+    cpu.exec_adiw(encode_adiw(24, 1));
+
+    REQUIRE((cpu.sreg() & 0xC0) == 0xC0);
+}
+
+TEST_CASE("ADIW - returns 2 cycles", "[adiw][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    set_word(cpu, 24, 0x0010);
+    u8 cycles = cpu.exec_adiw(encode_adiw(24, 1));
+
+    REQUIRE(cycles == 2u);
+}

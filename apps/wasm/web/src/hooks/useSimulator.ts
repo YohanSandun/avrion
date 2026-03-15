@@ -55,21 +55,24 @@ export function useSimulator(): SimulatorState & SimulatorControls {
         // avrion_wasm.js is a UMD script served from /public (not an ES module).
         // We load it by injecting a <script> tag so Vite's import-analysis is
         // never involved, then access the factory via window.createAvrionModule.
+        // Use import.meta.env.BASE_URL so the path is correct both in dev (/)
+        // and on GitHub Pages (/avrion/).
+        const base = import.meta.env.BASE_URL; // e.g. "/" or "/avrion/"
         await new Promise<void>((resolve, reject) => {
           if ((window as unknown as Record<string, unknown>)['createAvrionModule']) {
             resolve(); // already loaded from a previous HMR cycle
             return;
           }
           const script = document.createElement('script');
-          script.src = '/avrion_wasm.js';
+          script.src = `${base}avrion_wasm.js`;
           script.onload = () => resolve();
-          script.onerror = () => reject(new Error('Failed to load /avrion_wasm.js — run the Emscripten build first.'));
+          script.onerror = () => reject(new Error(`Failed to load ${base}avrion_wasm.js — run the Emscripten build first.`));
           document.head.appendChild(script);
         });
 
         type FactoryFn = (opts?: { locateFile?: (f: string) => string }) => Promise<{ Simulator: new () => SimulatorInstance }>;
         const factory = (window as unknown as Record<string, FactoryFn>)['createAvrionModule'];
-        const mod = await factory({ locateFile: (f: string) => '/' + f });
+        const mod = await factory({ locateFile: (f: string) => `${base}${f}` });
         instance = new mod.Simulator();
         simRef.current = instance;
         refreshPorts();

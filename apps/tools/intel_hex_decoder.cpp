@@ -1,6 +1,7 @@
 #include "intel_hex_decoder.h"
 
 #include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -11,11 +12,23 @@ std::vector<uint8_t> IntelHexDecoder::decodeFile(const std::string& filePath)
     std::ifstream file(filePath);
     if (!file.is_open())
         throw std::runtime_error("IntelHexDecoder: cannot open file: " + filePath);
+    return decodeLinesFrom(file);
+}
 
+std::vector<uint8_t> IntelHexDecoder::decodeString(const std::string& hexContent)
+{
+    std::istringstream stream(hexContent);
+    return decodeLinesFrom(stream);
+}
+
+// ---- private ---------------------------------------------------------------
+
+std::vector<uint8_t> IntelHexDecoder::decodeLinesFrom(std::istream& stream)
+{
     std::vector<uint8_t> bytes;
     std::string line;
 
-    while (std::getline(file, line))
+    while (std::getline(stream, line))
     {
         // Strip Windows-style carriage return
         if (!line.empty() && line.back() == '\r')

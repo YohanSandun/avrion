@@ -4,36 +4,36 @@ project(avr_emu_gui LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(OpenGL REQUIRED)
+# ---- Native-only dependencies (GLFW, OpenGL, ImGui) ----
+# These are NOT built when cross-compiling to WebAssembly.
+if(NOT EMSCRIPTEN)
+  find_package(OpenGL REQUIRED)
 
-# ---- GLFW ----
-# If vendored:
-add_subdirectory(third_party/glfw)
+  # GLFW (vendored)
+  add_subdirectory(third_party/glfw)
 
-# If using system glfw instead, comment out add_subdirectory and use:
-# find_package(glfw3 REQUIRED)
+  # ImGui (vendored sources)
+  set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/third_party/imgui)
 
-# ---- ImGui (vendored sources) ----
-set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/third_party/imgui)
+  add_library(imgui STATIC
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_demo.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
 
-add_library(imgui STATIC
-  ${IMGUI_DIR}/imgui.cpp
-  ${IMGUI_DIR}/imgui_demo.cpp
-  ${IMGUI_DIR}/imgui_draw.cpp
-  ${IMGUI_DIR}/imgui_tables.cpp
-  ${IMGUI_DIR}/imgui_widgets.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
+  )
 
-  ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
-  ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
-)
+  target_include_directories(imgui PUBLIC
+    ${IMGUI_DIR}
+    ${IMGUI_DIR}/backends
+  )
 
-target_include_directories(imgui PUBLIC
-  ${IMGUI_DIR}
-  ${IMGUI_DIR}/backends
-)
-
-# ImGui needs GLFW + OpenGL
-target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
+  # ImGui needs GLFW + OpenGL
+  target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
+endif()
 
 # ---- Core library (shared emulator logic) ----
 add_library(avr_core STATIC
@@ -57,9 +57,18 @@ target_include_directories(avr_core PUBLIC
 )
 
 # ---- Applications ----
-add_subdirectory(apps/gui)
-add_subdirectory(apps/cli)
+if(NOT EMSCRIPTEN)
+  add_subdirectory(apps/gui)
+  add_subdirectory(apps/cli)
+endif()
+
+# ---- WebAssembly app (Emscripten only) ----
+if(EMSCRIPTEN)
+  add_subdirectory(apps/wasm)
+endif()
 
 # ---- Tests ----
-enable_testing()
-add_subdirectory(tests)
+if(NOT EMSCRIPTEN)
+  enable_testing()
+  add_subdirectory(tests)
+endif()

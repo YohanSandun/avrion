@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-  // Treat .wasm as a URL asset so Emscripten JS can locate it at runtime
+  base: '/avrion/',
   assetsInclude: ['**/*.wasm'],
   server: {
     headers: {

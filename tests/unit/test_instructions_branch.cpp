@@ -1551,3 +1551,147 @@ TEST_CASE("BRCC - cycle count not taken: returns 1", "[brcc]")
 
     REQUIRE(cycles == 1);
 }
+
+// ---------------------------------------------------------------------------
+// IJMP  (1001 0100 0000 1001)
+//
+// PC <- Z  where Z (R31:R30) is a 16-bit word address.
+// Because the emulator's PC is byte-addressed the jump target is Z << 1.
+// No flags are affected; Z registers are not modified.
+// ---------------------------------------------------------------------------
+
+static DeviceConfig make_z_branch_config()
+{
+    DeviceConfig c{};
+    c.flash_size_bytes = 32 * 1024;
+    c.sram_size_bytes  = 2  * 1024;
+    c.sram_base        = 0x0100;
+    c.z_low_reg        = 30;  // ZL = R30
+    c.z_high_reg       = 31;  // ZH = R31
+    return c;
+}
+
+static constexpr u16 IJMP_OPCODE = 0x9409;
+
+TEST_CASE("IJMP - PC set to Z word address converted to byte address", "[ijmp]")
+{
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // Z = 0x005C (word address) -> expected PC = 0x00B8 (byte address)
+    cpu.set_reg(30, 0x5C); // ZL
+    cpu.set_reg(31, 0x00); // ZH
+
+    cpu.exec_ijmp(IJMP_OPCODE);
+
+    REQUIRE(cpu.pc() == 0x00B8u);
+}
+
+TEST_CASE("IJMP - Z = 0 jumps to address 0 (reset vector)", "[ijmp]")
+{
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x00);
+    cpu.set_reg(31, 0x00);
+    cpu.set_pc(0x1000); // start somewhere else
+
+    cpu.exec_ijmp(IJMP_OPCODE);
+
+    REQUIRE(cpu.pc() == 0x0000u);
+}
+
+TEST_CASE("IJMP - ZH:ZL both contribute to the target address", "[ijmp]")
+{
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // Z = 0x0100 (word addr) -> byte addr = 0x0200
+    cpu.set_reg(30, 0x00); // ZL
+    cpu.set_reg(31, 0x01); // ZH
+
+    cpu.exec_ijmp(IJMP_OPCODE);
+
+    REQUIRE(cpu.pc() == 0x0200u);
+}
+
+TEST_CASE("IJMP - ZL alone (ZH = 0) forms correct byte address", "[ijmp]")
+{
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // Z = 0x0010 -> byte addr = 0x0020
+    cpu.set_reg(30, 0x10);
+    cpu.set_reg(31, 0x00);
+
+    cpu.exec_ijmp(IJMP_OPCODE);
+
+    REQUIRE(cpu.pc() == 0x0020u);
+}
+
+TEST_CASE("IJMP - maximum Z value produces correct byte address", "[ijmp]")
+{
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // Z = 0x3FFF (word addr) -> byte addr = 0x7FFE (fits in 32KB flash)
+    cpu.set_reg(30, 0xFF); // ZL
+    cpu.set_reg(31, 0x3F); // ZH
+
+    cpu.exec_ijmp(IJMP_OPCODE);
+
+    REQUIRE(cpu.pc() == 0x7FFEu);
+}
+
+TEST_CASE("IJMP - Z registers not modified", "[ijmp]")
+{
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x2A);
+    cpu.set_reg(31, 0x01);
+
+    cpu.exec_ijmp(IJMP_OPCODE);
+
+    REQUIRE(cpu.reg(30) == 0x2A);
+    REQUIRE(cpu.reg(31) == 0x01);
+}
+
+TEST_CASE("IJMP - previous PC value has no influence on target", "[ijmp]")
+{
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x04);
+    cpu.set_reg(31, 0x00); // Z = 0x0004 -> byte addr 0x0008
+
+    cpu.set_pc(0x0000);
+    cpu.exec_ijmp(IJMP_OPCODE);
+    REQUIRE(cpu.pc() == 0x0008u);
+
+    // jump again from a different PC — result must be the same
+    cpu.set_pc(0x1234);
+    cpu.exec_ijmp(IJMP_OPCODE);
+    REQUIRE(cpu.pc() == 0x0008u);
+}
+
+TEST_CASE("IJMP - returns 2 cycles", "[ijmp]")
+{
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x01);
+    cpu.set_reg(31, 0x00);
+
+    u8 cycles = cpu.exec_ijmp(IJMP_OPCODE);
+
+    REQUIRE(cycles == 2u);
+}

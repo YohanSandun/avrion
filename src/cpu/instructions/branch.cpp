@@ -148,4 +148,11 @@ u8 AvrCpu::exec_brcc(u16 opcode) {
     return 2;
 }
 
+u8 AvrCpu::exec_ijmp(u16 opcode) {
+    // IJMP
+    // 1001 0100 0000 1001
+    set_pc(static_cast<u32>(z()) << 1);
+    return 2;
+}
+
 } // namespace avrion

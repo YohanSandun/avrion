@@ -1,0 +1,26 @@
+type: atmega328p
+category: mcu
+pins:
+  - name: D13
+    side: left
+    offset: 34
+    gpio:
+      port: PORTB
+      bit: 5
+  - name: GND
+    side: right
+    offset: 199
+
+render:
+  asset: "assets/mcu/atmega328p_dip28.png"
+  size: [120, 300]
+  pin_anchor_mode: metadata
+
+variants:
+  - id: dip28
+    asset: "assets/mcu/atmega328p_dip28.png"
+  - id: tqfp32
+    asset: "assets/mcu/atmega328p_tqfp32.png"
+
+simulation:
+  model: "avr_atmega328p"

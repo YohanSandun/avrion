@@ -1,0 +1,16 @@
+type: led_red
+category: display
+pins:
+  - name: A
+    side: bottom
+    offset: 8
+  - name: K
+    side: bottom
+    offset: 17
+
+render:
+  asset: "assets/display/led_red.png"
+  size: [25, 55]
+  pin_anchor_mode: metadata
+
+variants: []

@@ -1,0 +1,45 @@
+version: 1
+
+library:
+  atmega328p: "mcu/atmega328p"
+  led_red: "display/led_red"
+
+components:
+  - id: u1
+    type: atmega328p
+    value: null
+    props:
+      clock_hz: 16000000
+      firmware: "tests/data/blink.hex"
+    layout:
+      x: 200
+      y: 150
+      rotation: 0
+      symbol: dip28
+
+  - id: led1
+    type: led_red
+    layout:
+      x: 400
+      y: 0
+      rotation: 0
+
+nets:
+  - id: gnd
+    connects: [u1.GND, led1.K]
+
+  - id: led_drive
+    connects: [u1.D13, led1.A]
+
+wire_routes:
+  - net: led_drive
+    points: [[200, 185], [100, 185], [100, 48], [405, 48]]
+
+  - net: gnd
+    points: [[320, 350], [420, 350], [420, 48]]
+
+styles:
+  theme: default
+  grid:
+    size: 20
+    visible: true

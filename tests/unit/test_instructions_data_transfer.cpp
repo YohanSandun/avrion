@@ -2927,3 +2927,499 @@ TEST_CASE("LD Y+q - flags not affected", "[ld_y_disp][data_transfer]")
 
     REQUIRE(cpu.sreg() == sentinel);
 }
+
+// ---------------------------------------------------------------------------
+// LD Z / LD Z+ / LD -Z / LD Z+q
+//
+// LD Z    1000 000d dddd 0000
+// LD Z+   1001 000d dddd 0001
+// LD -Z   1001 000d dddd 0010
+// LD Z+q  10q0 qq0d dddd 0qqq
+//
+// Standard AVR: ZL = R30 (z_low_reg), ZH = R31 (z_high_reg).
+// These variants read SRAM (mem_.read8), unlike LPM which reads flash.
+// ---------------------------------------------------------------------------
+
+static DeviceConfig make_z_config()
+{
+    DeviceConfig c{};
+    c.flash_size_bytes = 32 * 1024;
+    c.io_base          = 0x0020;
+    c.sram_base        = 0x0100;
+    c.sram_size_bytes  = 512;
+    c.x_low_reg        = 26;
+    c.x_high_reg       = 27;
+    c.y_low_reg        = 28;
+    c.y_high_reg       = 29;
+    c.z_low_reg        = 30;  // ZL = R30
+    c.z_high_reg       = 31;  // ZH = R31
+    return c;
+}
+
+// Encode LD Z, Rd  (1000 000d dddd 0000)
+static u16 encode_ld_z(u8 d)
+{
+    return static_cast<u16>(0x8000 | ((d & 0x1F) << 4));
+}
+
+// Encode LD Z+, Rd  (1001 000d dddd 0001)
+static u16 encode_ld_z_post_inc(u8 d)
+{
+    return static_cast<u16>(0x9001 | ((d & 0x1F) << 4));
+}
+
+// Encode LD -Z, Rd  (1001 000d dddd 0010)
+static u16 encode_ld_z_pre_dec(u8 d)
+{
+    return static_cast<u16>(0x9002 | ((d & 0x1F) << 4));
+}
+
+// Encode LD Z+q, Rd  (10q0 qq0d dddd 0qqq)
+// q[5]   -> opcode[13]
+// q[4:3] -> opcode[11:10]
+// q[2:0] -> opcode[2:0]
+static u16 encode_ld_z_disp(u8 d, u8 q)
+{
+    return static_cast<u16>(0x8000
+        | ((d & 0x1F) << 4)
+        | ((q & 0x20) << 8)   // q[5] -> bit 13
+        | ((q & 0x18) << 7)   // q[4:3] -> bits 11:10
+        | (q & 0x07));        // q[2:0] -> bits 2:0
+}
+
+// ---------------------------------------------------------------------------
+// LD Z
+// ---------------------------------------------------------------------------
+
+TEST_CASE("LD Z - loads value from memory at Z address into Rd", "[ld_z][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x10); // ZL — Z = 0x0110
+    cpu.set_reg(31, 0x01); // ZH
+    mem.write8(0x0110, 0xAB);
+
+    cpu.exec_ld_z(encode_ld_z(5));
+
+    REQUIRE(cpu.reg(5) == 0xAB);
+}
+
+TEST_CASE("LD Z - loads zero value correctly", "[ld_z][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x05); // Z = 0x0105
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(3, 0xFF);  // pre-fill destination
+    mem.write8(0x0105, 0x00);
+
+    cpu.exec_ld_z(encode_ld_z(3));
+
+    REQUIRE(cpu.reg(3) == 0x00);
+}
+
+TEST_CASE("LD Z - correct destination register (R0)", "[ld_z][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(1, 0xCC);  // decoy
+    mem.write8(0x0100, 0x11);
+
+    cpu.exec_ld_z(encode_ld_z(0));
+
+    REQUIRE(cpu.reg(0) == 0x11);
+    REQUIRE(cpu.reg(1) == 0xCC); // decoy unchanged
+}
+
+TEST_CASE("LD Z - correct destination register (R29)", "[ld_z][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x08); // Z = 0x0108
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(28, 0x55); // decoy
+    mem.write8(0x0108, 0xDD);
+
+    cpu.exec_ld_z(encode_ld_z(29));
+
+    REQUIRE(cpu.reg(29) == 0xDD);
+    REQUIRE(cpu.reg(28) == 0x55); // decoy unchanged
+}
+
+TEST_CASE("LD Z - Z pointer registers not modified", "[ld_z][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x0A); // Z = 0x010A
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x010A, 0x77);
+
+    cpu.exec_ld_z(encode_ld_z(5));
+
+    REQUIRE(cpu.reg(30) == 0x0A);
+    REQUIRE(cpu.reg(31) == 0x01);
+}
+
+TEST_CASE("LD Z - flags not affected", "[ld_z][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    constexpr u8 sentinel = 0b10110101;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x0100, 0x42);
+
+    cpu.exec_ld_z(encode_ld_z(7));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+// ---------------------------------------------------------------------------
+// LD Z+
+// ---------------------------------------------------------------------------
+
+TEST_CASE("LD Z+ - loads value from memory at Z address into Rd", "[ld_z_post_inc][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x05); // Z = 0x0105
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x0105, 0xFE);
+
+    cpu.exec_ld_z_post_inc(encode_ld_z_post_inc(4));
+
+    REQUIRE(cpu.reg(4) == 0xFE);
+}
+
+TEST_CASE("LD Z+ - Z is incremented by 1 after load", "[ld_z_post_inc][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x05); // Z = 0x0105
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x0105, 0x22);
+
+    cpu.exec_ld_z_post_inc(encode_ld_z_post_inc(4));
+
+    REQUIRE(cpu.z() == 0x0106);
+    REQUIRE(cpu.reg(30) == 0x06); // ZL incremented
+    REQUIRE(cpu.reg(31) == 0x01); // ZH unchanged
+}
+
+TEST_CASE("LD Z+ - load happens before increment (reads original Z address)", "[ld_z_post_inc][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x10); // Z = 0x0110
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x0110, 0xAA);
+    mem.write8(0x0111, 0xBB); // next address — must not be read
+
+    cpu.exec_ld_z_post_inc(encode_ld_z_post_inc(2));
+
+    REQUIRE(cpu.reg(2) == 0xAA); // read from original Z, not Z+1
+}
+
+TEST_CASE("LD Z+ - ZL wraps and carries into ZH on 0xFF->0x00 boundary", "[ld_z_post_inc][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // Z = 0x01FF → after increment should become 0x0200
+    cpu.set_reg(30, 0xFF); // ZL
+    cpu.set_reg(31, 0x01); // ZH
+    mem.write8(0x01FF, 0x99);
+
+    cpu.exec_ld_z_post_inc(encode_ld_z_post_inc(6));
+
+    REQUIRE(cpu.reg(6) == 0x99);
+    REQUIRE(cpu.reg(30) == 0x00); // ZL wrapped to 0
+    REQUIRE(cpu.reg(31) == 0x02); // ZH carried
+}
+
+TEST_CASE("LD Z+ - flags not affected", "[ld_z_post_inc][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    constexpr u8 sentinel = 0b11001010;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x0100, 0x33);
+
+    cpu.exec_ld_z_post_inc(encode_ld_z_post_inc(10));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+// ---------------------------------------------------------------------------
+// LD -Z
+// ---------------------------------------------------------------------------
+
+TEST_CASE("LD -Z - Z is decremented before load", "[ld_z_pre_dec][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // Z initially = 0x0106 → pre-decrement to 0x0105, then load
+    cpu.set_reg(30, 0x06); // ZL
+    cpu.set_reg(31, 0x01); // ZH
+    mem.write8(0x0105, 0x11);
+
+    cpu.exec_ld_z_pre_dec(encode_ld_z_pre_dec(7));
+
+    REQUIRE(cpu.reg(7) == 0x11);
+    REQUIRE(cpu.z() == 0x0105);
+}
+
+TEST_CASE("LD -Z - loads value from decremented address, not original Z", "[ld_z_pre_dec][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x10); // Z = 0x0110
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x010F, 0x55); // address after decrement
+    mem.write8(0x0110, 0xAA); // original Z address — must NOT be read
+
+    cpu.exec_ld_z_pre_dec(encode_ld_z_pre_dec(3));
+
+    REQUIRE(cpu.reg(3) == 0x55);
+}
+
+TEST_CASE("LD -Z - Z pointer updated to decremented address", "[ld_z_pre_dec][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x0A); // Z = 0x010A
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x0109, 0x00);
+
+    cpu.exec_ld_z_pre_dec(encode_ld_z_pre_dec(5));
+
+    REQUIRE(cpu.z()     == 0x0109);
+    REQUIRE(cpu.reg(30) == 0x09);
+    REQUIRE(cpu.reg(31) == 0x01);
+}
+
+TEST_CASE("LD -Z - ZL borrow propagates into ZH on 0x00->0xFF boundary", "[ld_z_pre_dec][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // Z = 0x0200 → decrement to 0x01FF
+    cpu.set_reg(30, 0x00); // ZL
+    cpu.set_reg(31, 0x02); // ZH
+    mem.write8(0x01FF, 0xBC);
+
+    cpu.exec_ld_z_pre_dec(encode_ld_z_pre_dec(8));
+
+    REQUIRE(cpu.reg(8)  == 0xBC);
+    REQUIRE(cpu.reg(30) == 0xFF); // ZL wrapped
+    REQUIRE(cpu.reg(31) == 0x01); // ZH decremented
+}
+
+TEST_CASE("LD -Z - flags not affected", "[ld_z_pre_dec][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    constexpr u8 sentinel = 0b01010101;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(30, 0x05); // Z = 0x0105
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x0104, 0x00);
+
+    cpu.exec_ld_z_pre_dec(encode_ld_z_pre_dec(9));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+// ---------------------------------------------------------------------------
+// LD Z+q
+// ---------------------------------------------------------------------------
+
+TEST_CASE("LD Z+q - loads from address Z+q (q=0 reads from Z directly)", "[ld_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x0100, 0xAB);
+
+    cpu.exec_ld_z_disp(encode_ld_z_disp(5, 0));
+
+    REQUIRE(cpu.reg(5) == 0xAB);
+}
+
+TEST_CASE("LD Z+q - loads from address Z+q (q=1)", "[ld_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x0101, 0x22);
+
+    cpu.exec_ld_z_disp(encode_ld_z_disp(3, 1));
+
+    REQUIRE(cpu.reg(3) == 0x22);
+}
+
+TEST_CASE("LD Z+q - loads from address Z+q (q=7, tests low q bits)", "[ld_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x0107, 0xCC);
+
+    cpu.exec_ld_z_disp(encode_ld_z_disp(10, 7));
+
+    REQUIRE(cpu.reg(10) == 0xCC);
+}
+
+TEST_CASE("LD Z+q - loads from address Z+q (q=8, tests bit q[3])", "[ld_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x0108, 0xDD);
+
+    cpu.exec_ld_z_disp(encode_ld_z_disp(6, 8));
+
+    REQUIRE(cpu.reg(6) == 0xDD);
+}
+
+TEST_CASE("LD Z+q - loads from address Z+q (q=16, tests bit q[4])", "[ld_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x0110, 0xEE);
+
+    cpu.exec_ld_z_disp(encode_ld_z_disp(1, 16));
+
+    REQUIRE(cpu.reg(1) == 0xEE);
+}
+
+TEST_CASE("LD Z+q - loads from address Z+q (q=32, tests bit q[5])", "[ld_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x0120, 0x99);
+
+    cpu.exec_ld_z_disp(encode_ld_z_disp(2, 32));
+
+    REQUIRE(cpu.reg(2) == 0x99);
+}
+
+TEST_CASE("LD Z+q - loads from address Z+q (q=63, maximum displacement)", "[ld_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x013F, 0x77); // 0x0100 + 63 = 0x013F
+
+    cpu.exec_ld_z_disp(encode_ld_z_disp(15, 63));
+
+    REQUIRE(cpu.reg(15) == 0x77);
+}
+
+TEST_CASE("LD Z+q - Z pointer registers not modified", "[ld_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x02); // Z = 0x0102
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x010D, 0x55); // 0x0102 + 11 = 0x010D
+
+    cpu.exec_ld_z_disp(encode_ld_z_disp(5, 11));
+
+    REQUIRE(cpu.reg(30) == 0x02);
+    REQUIRE(cpu.reg(31) == 0x01);
+}
+
+TEST_CASE("LD Z+q - correct destination register selected (R0)", "[ld_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(1, 0xFF);  // decoy
+    mem.write8(0x0103, 0x42);
+
+    cpu.exec_ld_z_disp(encode_ld_z_disp(0, 3));
+
+    REQUIRE(cpu.reg(0) == 0x42);
+    REQUIRE(cpu.reg(1) == 0xFF); // decoy unchanged
+}
+
+TEST_CASE("LD Z+q - flags not affected", "[ld_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    constexpr u8 sentinel = 0b11010011;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    mem.write8(0x0104, 0xAA);
+
+    cpu.exec_ld_z_disp(encode_ld_z_disp(12, 4));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}

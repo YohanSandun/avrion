@@ -4,7 +4,7 @@
 
 namespace avrion {
 
-static const std::array<InstructionDesc, 49> kInstructionTable = {{
+static const std::array<InstructionDesc, 53> kInstructionTable = {{
     // mask  pattern name
     // misc
     {0xFFFF, 0x0000, "NOP",    &AvrCpu::exec_nop},
@@ -31,6 +31,10 @@ static const std::array<InstructionDesc, 49> kInstructionTable = {{
     {0xFE0F, 0x920F, "PUSH",   &AvrCpu::exec_push},
     {0xFC00, 0x2C00, "MOV",    &AvrCpu::exec_mov},
     {0xFE0F, 0x900F, "POP",    &AvrCpu::exec_pop},
+    {0xFE0F, 0x8008, "LD Y",   &AvrCpu::exec_ld_y},
+    {0xFE0F, 0x9009, "LD Y+",  &AvrCpu::exec_ld_y_post_inc},
+    {0xFE0F, 0x900A, "LD -Y",  &AvrCpu::exec_ld_y_pre_dec},
+    {0xD208, 0x8008, "LD Y+q", &AvrCpu::exec_ld_y_disp},
 
     // alu
     {0xFC00, 0x2400, "EOR",    &AvrCpu::exec_eor},

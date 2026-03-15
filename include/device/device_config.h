@@ -49,6 +49,8 @@ struct DeviceConfig {
 
   u16 x_low_reg = 0;       
   u16 x_high_reg = 0;      
+  u16 y_low_reg = 0;       
+  u16 y_high_reg = 0;    
   u16 z_low_reg = 0;
   u16 z_high_reg = 0;
 

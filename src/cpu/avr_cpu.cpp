@@ -68,6 +68,17 @@ namespace avrion
         set_reg(cfg_.x_high_reg, (v >> 8) & 0xFF);
     }
 
+    u16 AvrCpu::y() const
+    {
+        return (static_cast<u16>(reg(cfg_.y_high_reg)) << 8) | reg(cfg_.y_low_reg);
+    }
+
+    void AvrCpu::set_y(u16 v)
+    {
+        set_reg(cfg_.y_low_reg, v & 0xFF);
+        set_reg(cfg_.y_high_reg, (v >> 8) & 0xFF);
+    }
+
     u16 AvrCpu::z() const
     {
         return (static_cast<u16>(reg(cfg_.z_high_reg)) << 8) | reg(cfg_.z_low_reg);

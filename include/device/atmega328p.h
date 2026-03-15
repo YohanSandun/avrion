@@ -42,6 +42,10 @@ namespace avrion
             c.x_low_reg = 26;  
             c.x_high_reg = 27;
 
+            // YL = R28, YH = R29
+            c.y_low_reg = 28;  
+            c.y_high_reg = 29;
+
             // ZL = R30, ZH = R31
             c.z_low_reg = 30;
             c.z_high_reg = 31;

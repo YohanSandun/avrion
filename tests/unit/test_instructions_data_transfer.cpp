@@ -2433,3 +2433,497 @@ TEST_CASE("MOV - only destination modified, adjacent registers unchanged", "[mov
     REQUIRE(cpu.reg(9)  == 0x11); // source unchanged
     REQUIRE(cpu.reg(11) == 0x22); // adjacent unchanged
 }
+
+// ---------------------------------------------------------------------------
+// LD Y / LD Y+ / LD -Y / LD Y+q
+//
+// LD Y    1000 000d dddd 1000
+// LD Y+   1001 000d dddd 1001
+// LD -Y   1001 000d dddd 1010
+// LD Y+q  10q0 qq0d dddd 1qqq
+//
+// Standard AVR: YL = R28 (y_low_reg), YH = R29 (y_high_reg).
+// ---------------------------------------------------------------------------
+
+static DeviceConfig make_y_config()
+{
+    DeviceConfig c{};
+    c.flash_size_bytes = 32 * 1024;
+    c.io_base          = 0x0020;
+    c.sram_base        = 0x0100;
+    c.sram_size_bytes  = 512;
+    c.x_low_reg        = 26;
+    c.x_high_reg       = 27;
+    c.y_low_reg        = 28;  // YL = R28
+    c.y_high_reg       = 29;  // YH = R29
+    return c;
+}
+
+// Encode LD Y, Rd  (1000 000d dddd 1000)
+static u16 encode_ld_y(u8 d)
+{
+    return static_cast<u16>(0x8008 | ((d & 0x1F) << 4));
+}
+
+// Encode LD Y+, Rd  (1001 000d dddd 1001)
+static u16 encode_ld_y_post_inc(u8 d)
+{
+    return static_cast<u16>(0x9009 | ((d & 0x1F) << 4));
+}
+
+// Encode LD -Y, Rd  (1001 000d dddd 1010)
+static u16 encode_ld_y_pre_dec(u8 d)
+{
+    return static_cast<u16>(0x900A | ((d & 0x1F) << 4));
+}
+
+// Encode LD Y+q, Rd  (10q0 qq0d dddd 1qqq)
+// q[5]   -> opcode[13]
+// q[4:3] -> opcode[11:10]
+// q[2:0] -> opcode[2:0]
+static u16 encode_ld_y_disp(u8 d, u8 q)
+{
+    return static_cast<u16>(0x8008
+        | ((d & 0x1F) << 4)
+        | ((q & 0x20) << 8)   // q[5] -> bit 13
+        | ((q & 0x18) << 7)   // q[4:3] -> bits 11:10
+        | (q & 0x07));        // q[2:0] -> bits 2:0
+}
+
+// ---------------------------------------------------------------------------
+// LD Y
+// ---------------------------------------------------------------------------
+
+TEST_CASE("LD Y - loads value from memory at Y address into Rd", "[ld_y][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // Y = 0x0110
+    cpu.set_reg(28, 0x10); // YL
+    cpu.set_reg(29, 0x01); // YH
+    mem.write8(0x0110, 0xAB);
+
+    cpu.exec_ld_y(encode_ld_y(5));
+
+    REQUIRE(cpu.reg(5) == 0xAB);
+}
+
+TEST_CASE("LD Y - loads zero value correctly", "[ld_y][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x05); // Y = 0x0105
+    cpu.set_reg(29, 0x01);
+    cpu.set_reg(3, 0xFF);  // pre-fill destination
+    mem.write8(0x0105, 0x00);
+
+    cpu.exec_ld_y(encode_ld_y(3));
+
+    REQUIRE(cpu.reg(3) == 0x00);
+}
+
+TEST_CASE("LD Y - correct destination register (R0)", "[ld_y][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x00); // Y = 0x0100
+    cpu.set_reg(29, 0x01);
+    cpu.set_reg(1, 0xCC);  // decoy
+    mem.write8(0x0100, 0x11);
+
+    cpu.exec_ld_y(encode_ld_y(0));
+
+    REQUIRE(cpu.reg(0) == 0x11);
+    REQUIRE(cpu.reg(1) == 0xCC); // decoy unchanged
+}
+
+TEST_CASE("LD Y - correct destination register (R31)", "[ld_y][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x08); // Y = 0x0108
+    cpu.set_reg(29, 0x01);
+    cpu.set_reg(30, 0x55); // decoy
+    mem.write8(0x0108, 0xDD);
+
+    cpu.exec_ld_y(encode_ld_y(31));
+
+    REQUIRE(cpu.reg(31) == 0xDD);
+    REQUIRE(cpu.reg(30) == 0x55); // decoy unchanged
+}
+
+TEST_CASE("LD Y - Y pointer registers not modified", "[ld_y][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x0A); // Y = 0x010A
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x010A, 0x77);
+
+    cpu.exec_ld_y(encode_ld_y(5));
+
+    REQUIRE(cpu.reg(28) == 0x0A);
+    REQUIRE(cpu.reg(29) == 0x01);
+}
+
+TEST_CASE("LD Y - flags not affected", "[ld_y][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    constexpr u8 sentinel = 0b10110101;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(28, 0x00); // Y = 0x0100
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x0100, 0x42);
+
+    cpu.exec_ld_y(encode_ld_y(7));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+// ---------------------------------------------------------------------------
+// LD Y+
+// ---------------------------------------------------------------------------
+
+TEST_CASE("LD Y+ - loads value from memory at Y address into Rd", "[ld_y_post_inc][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x05); // Y = 0x0105
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x0105, 0xFE);
+
+    cpu.exec_ld_y_post_inc(encode_ld_y_post_inc(4));
+
+    REQUIRE(cpu.reg(4) == 0xFE);
+}
+
+TEST_CASE("LD Y+ - Y is incremented by 1 after load", "[ld_y_post_inc][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x05); // Y = 0x0105
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x0105, 0x22);
+
+    cpu.exec_ld_y_post_inc(encode_ld_y_post_inc(4));
+
+    REQUIRE(cpu.y() == 0x0106);
+    REQUIRE(cpu.reg(28) == 0x06); // YL incremented
+    REQUIRE(cpu.reg(29) == 0x01); // YH unchanged
+}
+
+TEST_CASE("LD Y+ - load happens before increment (reads original Y address)", "[ld_y_post_inc][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x10); // Y = 0x0110
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x0110, 0xAA);
+    mem.write8(0x0111, 0xBB); // next address — must not be read
+
+    cpu.exec_ld_y_post_inc(encode_ld_y_post_inc(2));
+
+    REQUIRE(cpu.reg(2) == 0xAA); // read from original Y, not Y+1
+}
+
+TEST_CASE("LD Y+ - YL wraps and carries into YH on 0xFF->0x00 boundary", "[ld_y_post_inc][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // Y = 0x01FF → after increment should become 0x0200
+    cpu.set_reg(28, 0xFF); // YL
+    cpu.set_reg(29, 0x01); // YH
+    mem.write8(0x01FF, 0x99);
+
+    cpu.exec_ld_y_post_inc(encode_ld_y_post_inc(6));
+
+    REQUIRE(cpu.reg(6) == 0x99);
+    REQUIRE(cpu.reg(28) == 0x00); // YL wrapped to 0
+    REQUIRE(cpu.reg(29) == 0x02); // YH carried
+}
+
+TEST_CASE("LD Y+ - flags not affected", "[ld_y_post_inc][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    constexpr u8 sentinel = 0b11001010;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(28, 0x00); // Y = 0x0100
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x0100, 0x33);
+
+    cpu.exec_ld_y_post_inc(encode_ld_y_post_inc(10));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+// ---------------------------------------------------------------------------
+// LD -Y
+// ---------------------------------------------------------------------------
+
+TEST_CASE("LD -Y - Y is decremented before load", "[ld_y_pre_dec][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // Y initially = 0x0106 → pre-decrement to 0x0105, then load
+    cpu.set_reg(28, 0x06); // YL
+    cpu.set_reg(29, 0x01); // YH
+    mem.write8(0x0105, 0x11);
+
+    cpu.exec_ld_y_pre_dec(encode_ld_y_pre_dec(7));
+
+    REQUIRE(cpu.reg(7) == 0x11);
+    REQUIRE(cpu.y() == 0x0105);
+}
+
+TEST_CASE("LD -Y - loads value from decremented address, not original Y", "[ld_y_pre_dec][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x10); // Y = 0x0110
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x010F, 0x55); // address after decrement
+    mem.write8(0x0110, 0xAA); // original Y address — must NOT be read
+
+    cpu.exec_ld_y_pre_dec(encode_ld_y_pre_dec(3));
+
+    REQUIRE(cpu.reg(3) == 0x55);
+}
+
+TEST_CASE("LD -Y - Y pointer updated to decremented address", "[ld_y_pre_dec][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x0A); // Y = 0x010A
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x0109, 0x00);
+
+    cpu.exec_ld_y_pre_dec(encode_ld_y_pre_dec(5));
+
+    REQUIRE(cpu.y()      == 0x0109);
+    REQUIRE(cpu.reg(28)  == 0x09);
+    REQUIRE(cpu.reg(29)  == 0x01);
+}
+
+TEST_CASE("LD -Y - YL borrow propagates into YH on 0x00->0xFF boundary", "[ld_y_pre_dec][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    // Y = 0x0200 → decrement to 0x01FF
+    cpu.set_reg(28, 0x00); // YL
+    cpu.set_reg(29, 0x02); // YH
+    mem.write8(0x01FF, 0xBC);
+
+    cpu.exec_ld_y_pre_dec(encode_ld_y_pre_dec(8));
+
+    REQUIRE(cpu.reg(8)   == 0xBC);
+    REQUIRE(cpu.reg(28)  == 0xFF); // YL wrapped
+    REQUIRE(cpu.reg(29)  == 0x01); // YH decremented
+}
+
+TEST_CASE("LD -Y - flags not affected", "[ld_y_pre_dec][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    constexpr u8 sentinel = 0b01010101;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(28, 0x05); // Y = 0x0105
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x0104, 0x00);
+
+    cpu.exec_ld_y_pre_dec(encode_ld_y_pre_dec(9));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+// ---------------------------------------------------------------------------
+// LD Y+q
+// ---------------------------------------------------------------------------
+
+TEST_CASE("LD Y+q - loads from address Y+q (q=0 reads from Y directly)", "[ld_y_disp][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x00); // Y = 0x0100
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x0100, 0xAB);
+
+    cpu.exec_ld_y_disp(encode_ld_y_disp(5, 0));
+
+    REQUIRE(cpu.reg(5) == 0xAB);
+}
+
+TEST_CASE("LD Y+q - loads from address Y+q (q=1)", "[ld_y_disp][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x00); // Y = 0x0100
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x0101, 0x22);
+
+    cpu.exec_ld_y_disp(encode_ld_y_disp(3, 1));
+
+    REQUIRE(cpu.reg(3) == 0x22);
+}
+
+TEST_CASE("LD Y+q - loads from address Y+q (q=7, tests low q bits)", "[ld_y_disp][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x00); // Y = 0x0100
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x0107, 0xCC);
+
+    cpu.exec_ld_y_disp(encode_ld_y_disp(10, 7));
+
+    REQUIRE(cpu.reg(10) == 0xCC);
+}
+
+TEST_CASE("LD Y+q - loads from address Y+q (q=8, tests bit q[3])", "[ld_y_disp][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x00); // Y = 0x0100
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x0108, 0xDD);
+
+    cpu.exec_ld_y_disp(encode_ld_y_disp(6, 8));
+
+    REQUIRE(cpu.reg(6) == 0xDD);
+}
+
+TEST_CASE("LD Y+q - loads from address Y+q (q=16, tests bit q[4])", "[ld_y_disp][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x00); // Y = 0x0100
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x0110, 0xEE);
+
+    cpu.exec_ld_y_disp(encode_ld_y_disp(1, 16));
+
+    REQUIRE(cpu.reg(1) == 0xEE);
+}
+
+TEST_CASE("LD Y+q - loads from address Y+q (q=32, tests bit q[5])", "[ld_y_disp][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x00); // Y = 0x0100
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x0120, 0x99);
+
+    cpu.exec_ld_y_disp(encode_ld_y_disp(2, 32));
+
+    REQUIRE(cpu.reg(2) == 0x99);
+}
+
+TEST_CASE("LD Y+q - loads from address Y+q (q=63, maximum displacement)", "[ld_y_disp][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x00); // Y = 0x0100
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x013F, 0x77); // 0x0100 + 63 = 0x013F
+
+    cpu.exec_ld_y_disp(encode_ld_y_disp(15, 63));
+
+    REQUIRE(cpu.reg(15) == 0x77);
+}
+
+TEST_CASE("LD Y+q - Y pointer registers not modified", "[ld_y_disp][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x02); // Y = 0x0102
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x010D, 0x55); // 0x0102 + 11 = 0x010D
+
+    cpu.exec_ld_y_disp(encode_ld_y_disp(5, 11));
+
+    REQUIRE(cpu.reg(28) == 0x02);
+    REQUIRE(cpu.reg(29) == 0x01);
+}
+
+TEST_CASE("LD Y+q - correct destination register selected (R0)", "[ld_y_disp][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(28, 0x00); // Y = 0x0100
+    cpu.set_reg(29, 0x01);
+    cpu.set_reg(1, 0xFF);  // decoy
+    mem.write8(0x0103, 0x42);
+
+    cpu.exec_ld_y_disp(encode_ld_y_disp(0, 3));
+
+    REQUIRE(cpu.reg(0) == 0x42);
+    REQUIRE(cpu.reg(1) == 0xFF); // decoy unchanged
+}
+
+TEST_CASE("LD Y+q - flags not affected", "[ld_y_disp][data_transfer]")
+{
+    auto cfg = make_y_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    constexpr u8 sentinel = 0b11010011;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(28, 0x00); // Y = 0x0100
+    cpu.set_reg(29, 0x01);
+    mem.write8(0x0104, 0xAA);
+
+    cpu.exec_ld_y_disp(encode_ld_y_disp(12, 4));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}

@@ -9,7 +9,7 @@
 #include "intel_hex_decoder.h"
 
 #ifndef BLINK_HEX_PATH
-#  define BLINK_HEX_PATH "tests/data/blink.hex"
+#  define BLINK_HEX_PATH "tests/data/pattern.hex"
 #endif
 
 static std::atomic<bool> g_stop{false};

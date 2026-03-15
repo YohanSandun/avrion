@@ -34,6 +34,9 @@ public:
   u16 x() const;
   void set_x(u16 v);
 
+  u16 y() const;
+  void set_y(u16 v);
+
   u16 z() const;
   void set_z(u16 v);
 
@@ -81,6 +84,10 @@ public:
   u8 exec_push(u16 opcode);
   u8 exec_mov(u16 opcode);
   u8 exec_pop(u16 opcode);
+  u8 exec_ld_y(u16 opcode);
+  u8 exec_ld_y_post_inc(u16 opcode);
+  u8 exec_ld_y_pre_dec(u16 opcode);
+  u8 exec_ld_y_disp(u16 opcode);
 
   // Branching
   u8 exec_jmp(u16 opcode);

@@ -4,6 +4,7 @@
 #include "memory/memory_map.h"
 #include "cpu/decoder.h"
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 #include <stdexcept>
 
@@ -36,6 +37,7 @@ namespace avrion
             return irq_cycles;
 
         u16 opcode = mem_.fetch16(st_.pc);
+
         set_pc(st_.pc + 2);
 
         return dispatch_and_exec(opcode);

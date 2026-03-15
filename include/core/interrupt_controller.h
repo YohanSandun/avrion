@@ -1,6 +1,8 @@
 #pragma once
 #include "core/types.h"
+#include <array>
 #include <bitset>
+#include <functional>
 
 namespace avrion {
 
@@ -11,14 +13,29 @@ static constexpr u8 kMaxInterruptVectors = 32;
 
 class InterruptController {
 public:
+  using FlagClearFn = std::function<void()>;
+
   void raise(u8 vector) {
     if (vector > 0 && vector < kMaxInterruptVectors)
       pending_.set(vector);
   }
 
+  // Register a callback invoked when the CPU vectors to this interrupt.
+  // Used by peripherals to clear their hardware flag at the correct moment
+  // (identical to real AVR behaviour: flag clears when ISR is entered, not
+  // when the request is first posted).
+  void register_flag_clear(u8 vector, FlagClearFn fn) {
+    if (vector > 0 && vector < kMaxInterruptVectors)
+      flag_clears_[vector] = std::move(fn);
+  }
+
   void clear(u8 vector) {
-    if (vector < kMaxInterruptVectors)
+    if (vector < kMaxInterruptVectors) {
       pending_.reset(vector);
+      // Clear the corresponding hardware flag now that the CPU has vectored.
+      if (flag_clears_[vector])
+        flag_clears_[vector]();
+    }
   }
 
   bool any_pending() const { return pending_.any(); }
@@ -39,6 +56,7 @@ public:
 
 private:
   std::bitset<kMaxInterruptVectors> pending_;
+  std::array<FlagClearFn, kMaxInterruptVectors> flag_clears_{};
 };
 
 } // namespace avrion

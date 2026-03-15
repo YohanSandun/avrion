@@ -80,6 +80,7 @@ public:
   u8   read(u16 offset) override;
   void write(u16 offset, u8 value) override;
   void tick(u32 cycles) override;
+  void on_irq_controller_set() override;
 
 private:
   Timer8Vectors vectors_;

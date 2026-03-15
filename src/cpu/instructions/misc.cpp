@@ -26,6 +26,7 @@ u8 AvrCpu::exec_reti(u16) {
     }
     set_pc(ret);
     set_sreg(sreg() | 0x80); // set I bit (bit 7)
+
     return cfg_.has_22_bit_pc ? 5 : 4;
 }
 

@@ -72,16 +72,16 @@ namespace avrion
                 std::this_thread::sleep_for(expected - elapsed);
 
             // Heartbeat: print timing stats every 1s of emulated time.
-            if (total_cycles_ >= next_heartbeat_cycle)
-            {
-                next_heartbeat_cycle += cfg_.clock_hz;
-                auto wall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                   clock::now() - wall_start).count();
-                double emu_s = static_cast<double>(emulated) / cfg_.clock_hz;
-                std::fprintf(stderr, "[timing] %.3fs emulated | %lldms wall | %llu total cycles\n",
-                             emu_s, (long long)wall_ms, (unsigned long long)total_cycles_);
-                std::fflush(stderr);
-            }
+            // if (total_cycles_ >= next_heartbeat_cycle)
+            // {
+            //     next_heartbeat_cycle += cfg_.clock_hz;
+            //     auto wall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            //                        clock::now() - wall_start).count();
+            //     double emu_s = static_cast<double>(emulated) / cfg_.clock_hz;
+            //     std::fprintf(stderr, "[timing] %.3fs emulated | %lldms wall | %llu total cycles\n",
+            //                  emu_s, (long long)wall_ms, (unsigned long long)total_cycles_);
+            //     std::fflush(stderr);
+            // }
         }
     }
 

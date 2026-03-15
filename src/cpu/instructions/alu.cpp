@@ -157,8 +157,10 @@ u8 AvrCpu::exec_adc(u16 opcode) {
 
     u8 _sreg = sreg();
     _sreg = (_sreg & ~1u) | (((rd7 & rr7) | (rr7 & ~r7) | (~r7 & rd7)) & 1); // C flag
+    // _sreg = result == 0
+    //     ? (_sreg | 0x02) : (_sreg & ~0x02u); // Z set if result is zero
     _sreg = result == 0
-        ? (_sreg | 0x02) : (_sreg & ~0x02u); // Z set if result is zero
+    ? _sreg : (_sreg & ~0x02u);
     _sreg = (result & 0x80) != 0
         ? (_sreg | 0x04) : (_sreg & ~0x04); // N set if bit 7 of result is set
     _sreg = (_sreg & ~0x08u) | ((((rd7 & rr7 & ~r7) | (~rd7 & ~rr7 & r7)) & 1) << 3) ; // V flag

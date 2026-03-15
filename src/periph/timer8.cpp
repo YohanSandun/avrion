@@ -1,13 +1,22 @@
 #include "periph/timer8.h"
-#include <cstdio>
 
 namespace avrion {
 
-static unsigned s_tov_count = 0; // debug: count Timer0 OVF events
-
-
 Timer8::Timer8(Timer8Vectors vectors)
     : vectors_(vectors) {}
+
+void Timer8::on_irq_controller_set() {
+  if (!irq_) return;
+
+  // Register callbacks that clear the hardware TIFR flag when the CPU
+  // actually vectors to each ISR.
+  if (vectors_.ovf)
+    irq_->register_flag_clear(vectors_.ovf,   [this]{ tifr_ &= static_cast<u8>(~kTOV);  });
+  if (vectors_.compa)
+    irq_->register_flag_clear(vectors_.compa, [this]{ tifr_ &= static_cast<u8>(~kOCFA); });
+  if (vectors_.compb)
+    irq_->register_flag_clear(vectors_.compb, [this]{ tifr_ &= static_cast<u8>(~kOCFB); });
+}
 
 u8 Timer8::read(u16 offset) {
   switch (offset) {
@@ -155,37 +164,33 @@ void Timer8::advance_timer(u32 timer_ticks) {
     default:
       break;
     }
-  }
 
-  check_interrupts();
+    // Check and raise interrupts after every individual timer tick so that
+    // multiple overflows in one batch each generate their own IRQ.
+    check_interrupts();
+  }
 }
 
 void Timer8::check_interrupts() {
   if (!irq_) return;
 
   // Overflow interrupt
+  // Do NOT clear tifr_ here.  TOV0 must remain set until the CPU vectors to
+  // the ISR so the millis() race-window compensation (SBIS TIFR0,TOV0) works.
+  // The flag is cleared via the registered flag_clear callback in
+  // InterruptController::clear() at dispatch time.
   if ((timsk_ & kTOIE) && (tifr_ & kTOV)) {
-    ++s_tov_count;
-    if (s_tov_count <= 5) {
-      std::fprintf(stderr, "[timer] TOV #%u fired: tcnt=%u tccra=%02X tccrb=%02X timsk=%02X\n",
-                   s_tov_count, tcnt_, tccra_, tccrb_, timsk_);
-    } else if (s_tov_count == 6) {
-      std::fprintf(stderr, "[timer] TOV firing normally (suppressing further logs)\n");
-    }
     irq_->raise(vectors_.ovf);
-    tifr_ &= static_cast<u8>(~kTOV); // auto-clear on raise
   }
 
   // Compare A interrupt
   if ((timsk_ & kOCIEA) && (tifr_ & kOCFA)) {
     irq_->raise(vectors_.compa);
-    tifr_ &= static_cast<u8>(~kOCFA);
   }
 
   // Compare B interrupt
   if ((timsk_ & kOCIEB) && (tifr_ & kOCFB)) {
     irq_->raise(vectors_.compb);
-    tifr_ &= static_cast<u8>(~kOCFB);
   }
 }
 

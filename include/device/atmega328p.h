@@ -70,6 +70,12 @@ namespace avrion
             // TIMSK0 at 0x6E (1 byte) → periph register index 5 (TIMSKx)
             c.io_regions.push_back({ 0x006E, 1, "TIMER0", 5 });
 
+            // USART0 registers
+            // UCSR0A=0xC0, UCSR0B=0xC1, UCSR0C=0xC2 → periph offsets 0-2
+            c.io_regions.push_back({ 0x00C0, 3, "USART0", 0 });
+            // 0xC3 is reserved; UBRR0L=0xC4, UBRR0H=0xC5, UDR0=0xC6 → periph offsets 3-5
+            c.io_regions.push_back({ 0x00C4, 3, "USART0", 3 });
+
             return c;
         }
     };

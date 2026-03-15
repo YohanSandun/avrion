@@ -64,3 +64,12 @@ add_executable(test_interrupts
 target_link_libraries(test_interrupts PRIVATE avr_core Catch2::Catch2WithMain)
 
 catch_discover_tests(test_interrupts)
+
+# ---- USART unit tests -------------------------------------------------------
+add_executable(test_usart
+  test_usart.cpp
+)
+
+target_link_libraries(test_usart PRIVATE avr_core Catch2::Catch2WithMain)
+
+catch_discover_tests(test_usart)

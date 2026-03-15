@@ -16,6 +16,7 @@ export interface SimulatorState {
   ports: PortState[];
   totalCycles: number;
   hexLoaded: boolean;
+  serialOutput: string;
 }
 
 export interface SimulatorControls {
@@ -25,6 +26,8 @@ export interface SimulatorControls {
   pause: () => void;
   step: (n?: number) => void;
   setPinInput: (port: typeof PORT_NAMES[number], pin: number, high: boolean) => void;
+  sendSerial: (text: string) => void;
+  clearSerial: () => void;
 }
 
 export function useSimulator(): SimulatorState & SimulatorControls {
@@ -37,6 +40,7 @@ export function useSimulator(): SimulatorState & SimulatorControls {
   const [ports, setPorts] = useState<PortState[]>([]);
   const [totalCycles, setTotalCycles] = useState(0);
   const [hexLoaded, setHexLoaded] = useState(false);
+  const [serialOutput, setSerialOutput] = useState('');
 
   // Snapshot all port states from the C++ instance
   const refreshPorts = useCallback(() => {
@@ -103,9 +107,13 @@ export function useSimulator(): SimulatorState & SimulatorControls {
     const cycles = Math.round(elapsedMs * (CLOCK_HZ / 1000));
     if (cycles > 0) sim.run_cycles(cycles);
 
+    // Drain any bytes the firmware transmitted over USART0
+    const newOut = sim.poll_serial_output();
+    if (newOut.length > 0) setSerialOutput(prev => prev + newOut);
+
     refreshPorts();
     rafRef.current = requestAnimationFrame(runLoop);
-  }, [refreshPorts]);
+  }, [refreshPorts, setSerialOutput]);
 
   const loadHex = useCallback((content: string) => {
     const sim = simRef.current;
@@ -115,6 +123,7 @@ export function useSimulator(): SimulatorState & SimulatorControls {
       sim.reset();
       setHexLoaded(true);
       setStatus('ready');
+      setSerialOutput('');
       refreshPorts();
     } catch (e) {
       setErrorMsg(String(e));
@@ -128,6 +137,7 @@ export function useSimulator(): SimulatorState & SimulatorControls {
     if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     sim.reset();
     setStatus(hexLoaded ? 'ready' : 'idle');
+    setSerialOutput('');
     refreshPorts();
   }, [hexLoaded, refreshPorts]);
 
@@ -163,8 +173,16 @@ export function useSimulator(): SimulatorState & SimulatorControls {
     refreshPorts();
   }, [refreshPorts]);
 
+  const sendSerial = useCallback((text: string) => {
+    simRef.current?.send_serial_input(text);
+  }, []);
+
+  const clearSerial = useCallback(() => {
+    setSerialOutput('');
+  }, []);
+
   return {
-    status, errorMsg, ports, totalCycles, hexLoaded,
-    loadHex, reset, start, pause, step, setPinInput,
+    status, errorMsg, ports, totalCycles, hexLoaded, serialOutput,
+    loadHex, reset, start, pause, step, setPinInput, sendSerial, clearSerial,
   };
 }

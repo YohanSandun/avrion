@@ -3,6 +3,7 @@ import { useSimulator } from './hooks/useSimulator';
 import { HexUploader } from './components/HexUploader';
 import { SimulatorControls } from './components/SimulatorControls';
 import { GpioPanel } from './components/GpioPanel';
+import { SerialPanel } from './components/SerialPanel';
 
 type PortName = 'PORTB' | 'PORTC' | 'PORTD';
 
@@ -76,6 +77,17 @@ export default function App() {
           onPinToggle={sim.setPinInput}
           inputLevels={inputLevels}
           onInputLevelChange={handleInputLevelChange}
+        />
+      </section>
+
+      {/* Serial terminal */}
+      <section style={section}>
+        <SectionTitle>4. Serial Monitor (USART0 — 9600 baud)</SectionTitle>
+        <SerialPanel
+          output={sim.serialOutput}
+          onSend={sim.sendSerial}
+          onClear={sim.clearSerial}
+          disabled={sim.status !== 'running'}
         />
       </section>
     </div>

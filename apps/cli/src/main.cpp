@@ -4,8 +4,10 @@
 #include <csignal>
 #include <atomic>
 #include <chrono>
+#include <string>
 #include "device/atmega328p.h"
 #include "periph/gpio.h"
+#include "periph/usart.h"
 #include "intel_hex_decoder.h"
 
 #ifndef BLINK_HEX_PATH
@@ -18,11 +20,13 @@ static void handle_sigint(int) {
     g_stop.store(true);
 }
 
-int main() {
+int main(int argc, char* argv[]) {
     try {
+        const char* hex_path = (argc > 1) ? argv[1] : BLINK_HEX_PATH;
+
         avrion::ATmega328P dev;
 
-        const std::vector<uint8_t> flash_data = IntelHexDecoder::decodeFile(BLINK_HEX_PATH);
+        const std::vector<uint8_t> flash_data = IntelHexDecoder::decodeFile(hex_path);
         dev.load_flash(0, flash_data.data(), flash_data.size());
         dev.reset();
 
@@ -59,8 +63,28 @@ int main() {
         wire_trace("PORTC");
         wire_trace("PORTD");
 
+        // ------------------------------------------------------------------
+        // USART0 TX trace: line-buffer bytes and print complete lines with
+        // emulated timestamp so "Hello World\r\n" output is visible.
+        // ------------------------------------------------------------------
+        if (auto* usart = dev.get_peripheral<avrion::Usart>("USART0")) {
+            usart->set_tx_callback([&dev, line = std::string{}](uint8_t byte) mutable {
+                if (byte == '\r') return; // skip CR in CR+LF
+                if (byte == '\n') {
+                    double emu_ms = static_cast<double>(dev.total_cycles()) * 1000.0
+                                    / dev.config().clock_hz;
+                    std::printf("[%9.3fms emu] USART0: %s\n", emu_ms, line.c_str());
+                    std::fflush(stdout);
+                    line.clear();
+                } else {
+                    line += static_cast<char>(byte);
+                }
+            });
+        }
+
         std::signal(SIGINT, handle_sigint);
-        std::cout << "Running at " << dev.config().clock_hz / 1'000'000 << " MHz... Press Ctrl+C to stop." << std::endl;
+        std::cout << "Running " << hex_path << " at "
+                  << dev.config().clock_hz / 1'000'000 << " MHz... Press Ctrl+C to stop." << std::endl;
 
         dev.run_realtime(g_stop);
 

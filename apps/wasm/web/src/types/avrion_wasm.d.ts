@@ -30,6 +30,10 @@ export interface SimulatorInstance {
   get_pc(): number;
   /** Read a byte from the unified data space */
   read_data(addr: number): number;
+  /** Drain all bytes transmitted by USART0 since the last call */
+  poll_serial_output(): string;
+  /** Queue bytes to inject into USART0 RX (consumed one-by-one as firmware reads) */
+  send_serial_input(data: string): void;
   /** Free the C++ object */
   delete(): void;
 }

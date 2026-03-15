@@ -1,9 +1,13 @@
 #include "device/atmega328p.h"
 #include "periph/gpio.h"
+#include "periph/usart.h"
 #include "intel_hex_decoder.h"
 
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
+
+#include <queue>
+#include <string>
 
 using namespace avrion;
 using namespace emscripten;
@@ -12,6 +16,7 @@ class Simulator {
 public:
     Simulator() {
         dev_ = std::make_unique<ATmega328P>();
+        attach_usart_callback();
     }
 
     void load_hex(const std::string& hex_content) {
@@ -20,12 +25,43 @@ public:
     }
 
     void reset() {
+        // Flush pending serial state before resetting the CPU.
+        while (!rx_queue_.empty()) rx_queue_.pop();
+        tx_buf_.clear();
         dev_->reset();
+        // Peripheral objects survive reset; re-attach the callback so the
+        // Usart's internal tx_callback_ still points at our (now cleared) tx_buf_.
+        attach_usart_callback();
     }
 
     void run_cycles(int n) {
-        if (n > 0)
-            dev_->run_cycles(static_cast<uint64_t>(n));
+        if (n <= 0) return;
+
+        // Inject one pending RX byte whenever the USART buffer is free
+        // (RXC0 clear means firmware has consumed the previous byte).
+        auto* usart = dev_->get_peripheral<Usart>("USART0");
+        if (usart && !rx_queue_.empty()) {
+            if (!(dev_->read_data(0x00C0) & kRXC0)) {
+                usart->push_rx(rx_queue_.front());
+                rx_queue_.pop();
+            }
+        }
+
+        dev_->run_cycles(static_cast<uint64_t>(n));
+    }
+
+    // Returns all bytes transmitted since the last call (drain the buffer).
+    std::string poll_serial_output() {
+        std::string out;
+        out.swap(tx_buf_);
+        return out;
+    }
+
+    // Queue bytes to be injected into the USART0 RX one-by-one as the
+    // firmware reads them (single-byte USART buffer, rate-limited by RXC0).
+    void send_serial_input(const std::string& text) {
+        for (unsigned char c : text)
+            rx_queue_.push(c);
     }
 
     // Returns a JS object: { port: string, pins: [{index, is_output, level, pullup}] }
@@ -81,6 +117,17 @@ public:
 
 private:
     std::unique_ptr<ATmega328P> dev_;
+    std::string          tx_buf_;   // accumulates bytes from USART0 TX callback
+    std::queue<uint8_t>  rx_queue_; // bytes waiting to be injected into USART0 RX
+
+    void attach_usart_callback() {
+        auto* usart = dev_->get_peripheral<Usart>("USART0");
+        if (usart) {
+            usart->set_tx_callback([this](uint8_t byte) {
+                tx_buf_ += static_cast<char>(byte);
+            });
+        }
+    }
 };
 
 EMSCRIPTEN_BINDINGS(avrion) {
@@ -92,6 +139,8 @@ EMSCRIPTEN_BINDINGS(avrion) {
         .function("get_port_state",&Simulator::get_port_state)
         .function("set_pin_input", &Simulator::set_pin_input)
         .function("total_cycles",  &Simulator::total_cycles)
-        .function("get_pc",        &Simulator::get_pc)
-        .function("read_data",     &Simulator::read_data);
+        .function("get_pc",              &Simulator::get_pc)
+        .function("read_data",           &Simulator::read_data)
+        .function("poll_serial_output",  &Simulator::poll_serial_output)
+        .function("send_serial_input",   &Simulator::send_serial_input);
 }

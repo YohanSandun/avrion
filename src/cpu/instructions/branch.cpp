@@ -155,4 +155,17 @@ u8 AvrCpu::exec_ijmp(u16 opcode) {
     return 2;
 }
 
+u8 AvrCpu::exec_icall(u16 opcode) {
+    // ICALL
+    // 1001 0101 0000 1001
+    u32 ret = pc() + 2;
+    if (cfg_.has_22_bit_pc) {
+        mem_.write8(--st_.sp, (ret >> 16) & 0xFF); // upper byte pushed first (highest address)
+    }
+    mem_.write8(--st_.sp, (ret >> 8) & 0xFF); // hi byte
+    mem_.write8(--st_.sp, ret & 0xFF);        // lo byte — SP now points here
+    set_pc(static_cast<u32>(z()) << 1);
+    return cfg_.has_22_bit_pc ? 4 : 3;
+}
+
 } // namespace avrion

@@ -1695,3 +1695,270 @@ TEST_CASE("IJMP - returns 2 cycles", "[ijmp]")
 
     REQUIRE(cycles == 2u);
 }
+
+// ---------------------------------------------------------------------------
+// ICALL  (1001 0101 0000 1001)
+//
+// Calls the subroutine at the word address held in Z (R31:R30).
+// PC target = Z << 1  (word address -> byte address).
+// Return address (PC + 2, i.e. the instruction AFTER icall) is pushed
+// little-endian onto the stack:
+//   16-bit PC:  [SP-1]=hi, [SP-2]=lo    →  SP -= 2
+//   22-bit PC:  [SP-1]=upper, [SP-2]=hi, [SP-3]=lo  →  SP -= 3
+// ---------------------------------------------------------------------------
+
+static constexpr u16 ICALL_OPCODE = 0x9509;
+
+// Re-use make_z_branch_config() (defines ZL=R30, ZH=R31, 32 KB flash) and
+// INITIAL_SP (0x07FF) — both already defined above.
+
+// Helper: build a 22-bit-PC config with Z pointer registers.
+static DeviceConfig make_z_22bit_config()
+{
+    DeviceConfig c{};
+    c.flash_size_bytes = 256 * 1024;
+    c.sram_size_bytes  = 2   * 1024;
+    c.sram_base        = 0x0100;
+    c.has_22_bit_pc    = true;
+    c.z_low_reg        = 30;
+    c.z_high_reg       = 31;
+    return c;
+}
+
+TEST_CASE("ICALL - PC set to Z word address converted to byte address", "[icall]")
+{
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    // Z = 0x005C (word addr) -> target byte addr = 0x00B8
+    cpu.set_reg(30, 0x5C); // ZL
+    cpu.set_reg(31, 0x00); // ZH
+    cpu.set_pc(0x0100);
+
+    cpu.exec_icall(ICALL_OPCODE);
+
+    REQUIRE(cpu.pc() == 0x00B8u);
+}
+
+TEST_CASE("ICALL - Z = 0 jumps to address 0", "[icall]")
+{
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x00);
+    cpu.set_reg(31, 0x00);
+    cpu.set_pc(0x0100);
+
+    cpu.exec_icall(ICALL_OPCODE);
+
+    REQUIRE(cpu.pc() == 0x0000u);
+}
+
+TEST_CASE("ICALL - ZH:ZL both contribute to the target address", "[icall]")
+{
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    // Z = 0x0100 -> byte addr = 0x0200
+    cpu.set_reg(30, 0x00); // ZL
+    cpu.set_reg(31, 0x01); // ZH
+    cpu.set_pc(0x0050);
+
+    cpu.exec_icall(ICALL_OPCODE);
+
+    REQUIRE(cpu.pc() == 0x0200u);
+}
+
+TEST_CASE("ICALL - return address low byte pushed to stack (16-bit PC)", "[icall]")
+{
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    // PC = 0x0100 -> ret = 0x0102. lo byte = 0x02 at INITIAL_SP - 2.
+    cpu.set_reg(30, 0x01);
+    cpu.set_reg(31, 0x00);
+    cpu.set_pc(0x0100);
+
+    cpu.exec_icall(ICALL_OPCODE);
+
+    REQUIRE(mem.read8(INITIAL_SP - 2) == 0x02u);
+}
+
+TEST_CASE("ICALL - return address high byte pushed to stack (16-bit PC)", "[icall]")
+{
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    // PC = 0x0100 -> ret = 0x0102. hi byte = 0x01 at INITIAL_SP - 1.
+    cpu.set_reg(30, 0x01);
+    cpu.set_reg(31, 0x00);
+    cpu.set_pc(0x0100);
+
+    cpu.exec_icall(ICALL_OPCODE);
+
+    REQUIRE(mem.read8(INITIAL_SP - 1) == 0x01u);
+}
+
+TEST_CASE("ICALL - SP decremented by 2 after 16-bit-PC push", "[icall]")
+{
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x01);
+    cpu.set_reg(31, 0x00);
+    cpu.set_pc(0x0100);
+
+    cpu.exec_icall(ICALL_OPCODE);
+
+    REQUIRE(cpu.sp() == INITIAL_SP - 2);
+}
+
+TEST_CASE("ICALL - return address uses PC at call time (pc + 2)", "[icall]")
+{
+    // With PC = 0x0200 the pushed return address must be 0x0202.
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x01);
+    cpu.set_reg(31, 0x00);
+    cpu.set_pc(0x0200);
+
+    cpu.exec_icall(ICALL_OPCODE);
+
+    REQUIRE(mem.read8(INITIAL_SP - 2) == 0x02u); // lo of 0x0202
+    REQUIRE(mem.read8(INITIAL_SP - 1) == 0x02u); // hi of 0x0202
+}
+
+TEST_CASE("ICALL - 22-bit PC: all three return bytes pushed correctly", "[icall][22bit]")
+{
+    // PC = 0x0100 -> ret = 0x0102.
+    //   [INITIAL_SP - 3] = ret_lo   (0x02)  <- SP points here
+    //   [INITIAL_SP - 2] = ret_hi   (0x01)
+    //   [INITIAL_SP - 1] = ret_upper(0x00)
+    auto cfg = make_z_22bit_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x01);
+    cpu.set_reg(31, 0x00);
+    cpu.set_pc(0x0100);
+
+    cpu.exec_icall(ICALL_OPCODE);
+
+    REQUIRE(mem.read8(INITIAL_SP - 3) == 0x02u); // ret_lo
+    REQUIRE(mem.read8(INITIAL_SP - 2) == 0x01u); // ret_hi
+    REQUIRE(mem.read8(INITIAL_SP - 1) == 0x00u); // ret upper
+}
+
+TEST_CASE("ICALL - 22-bit PC: SP decremented by 3", "[icall][22bit]")
+{
+    auto cfg = make_z_22bit_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x01);
+    cpu.set_reg(31, 0x00);
+    cpu.set_pc(0x0100);
+
+    cpu.exec_icall(ICALL_OPCODE);
+
+    REQUIRE(cpu.sp() == INITIAL_SP - 3);
+}
+
+TEST_CASE("ICALL - 22-bit PC: jumps to correct target address", "[icall][22bit]")
+{
+    auto cfg = make_z_22bit_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    // Z = 0x0100 -> byte addr = 0x0200
+    cpu.set_reg(30, 0x00); // ZL
+    cpu.set_reg(31, 0x01); // ZH
+    cpu.set_pc(0x0050);
+
+    cpu.exec_icall(ICALL_OPCODE);
+
+    REQUIRE(cpu.pc() == 0x0200u);
+}
+
+TEST_CASE("ICALL - Z registers not modified", "[icall]")
+{
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x2A);
+    cpu.set_reg(31, 0x01);
+    cpu.set_pc(0x0100);
+
+    cpu.exec_icall(ICALL_OPCODE);
+
+    REQUIRE(cpu.reg(30) == 0x2A);
+    REQUIRE(cpu.reg(31) == 0x01);
+}
+
+TEST_CASE("ICALL - flags not affected", "[icall]")
+{
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    constexpr u8 sentinel = 0b10110101;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(30, 0x01);
+    cpu.set_reg(31, 0x00);
+    cpu.set_pc(0x0100);
+
+    cpu.exec_icall(ICALL_OPCODE);
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+TEST_CASE("ICALL - returns 3 cycles for 16-bit PC", "[icall]")
+{
+    auto cfg = make_z_branch_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x01);
+    cpu.set_reg(31, 0x00);
+
+    u8 cycles = cpu.exec_icall(ICALL_OPCODE);
+
+    REQUIRE(cycles == 3u);
+}
+
+TEST_CASE("ICALL - returns 4 cycles for 22-bit PC", "[icall][22bit]")
+{
+    auto cfg = make_z_22bit_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x01);
+    cpu.set_reg(31, 0x00);
+
+    u8 cycles = cpu.exec_icall(ICALL_OPCODE);
+
+    REQUIRE(cycles == 4u);
+}

@@ -110,6 +110,7 @@ public:
   u8 exec_brcs(u16 opcode);
   u8 exec_brcc(u16 opcode);
   u8 exec_ijmp(u16 opcode);
+  u8 exec_icall(u16 opcode);
 
 private:
   MemoryMap& mem_;

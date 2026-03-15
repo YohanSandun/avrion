@@ -414,4 +414,25 @@ u8 AvrCpu::exec_adiw(u16 opcode) {
     return 2;
 }
 
+u8 AvrCpu::exec_andi(u16 opcode) {
+    // ANDI
+    // 0111 KKKK dddd KKKK
+    u8 d = 16 + ((opcode >> 4) & 0x0F);
+    u8 k = (opcode & 0x000F) | ((opcode >> 4) & 0xF0);
+    u8 result = reg(d) & k;
+    set_reg(d, result);
+
+    u8 _sreg = sreg();
+    _sreg = result == 0
+        ? (_sreg | 0x02) : (_sreg & ~0x02u); // Z set if result is zero
+    _sreg = (result & 0x80) != 0
+        ? (_sreg | 0x04) : (_sreg & ~0x04); // N set if bit 7 of result is set
+    _sreg = (_sreg & ~0x08u); // V cleared
+    // S = N XOR V; since V is always 0 for ANDI, S = N
+    _sreg = (_sreg & 0x04)
+        ? (_sreg | 0x10) : (_sreg & ~0x10);
+    set_sreg(_sreg);
+    return 1;
+}
+
 } // namespace avrion

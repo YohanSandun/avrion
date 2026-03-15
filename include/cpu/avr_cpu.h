@@ -64,6 +64,7 @@ public:
   u8 exec_com(u16 opcode);
   u8 exec_sbiw(u16 opcode);
   u8 exec_adiw(u16 opcode);
+  u8 exec_andi(u16 opcode);
 
   // Data transfer
   u8 exec_out(u16 opcode);

@@ -3526,3 +3526,342 @@ TEST_CASE("ADIW - returns 2 cycles", "[adiw][alu]")
 
     REQUIRE(cycles == 2u);
 }
+
+// ---------------------------------------------------------------------------
+// ANDI  (0111 KKKK dddd KKKK)
+//
+// Operation : Rd ← Rd AND K    where d ∈ [16..31], K ∈ [0..255]
+// Flags     : Z = (result == 0), N = result[7], V = 0, S = N XOR V = N
+//             C and H are unaffected.
+// ---------------------------------------------------------------------------
+
+// Encode ANDI Rd, K opcode.
+static u16 encode_andi(u8 d, u8 k)
+{
+    u8 d_off = d - 16; // 4-bit offset into R16–R31
+    return static_cast<u16>(0x7000
+        | ((k & 0xF0) << 4)       // K[7:4] → bits [11:8]
+        | ((d_off & 0x0F) << 4)   // d offset → bits [7:4]
+        | (k & 0x0F));            // K[3:0] → bits [3:0]
+}
+
+// ---------------------------------------------------------------------------
+// Result and register tests
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ANDI - AND of two non-zero values", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0xFF);
+    cpu.exec_andi(encode_andi(16, 0x0F));
+
+    REQUIRE(cpu.reg(16) == 0x0F);
+}
+
+TEST_CASE("ANDI - immediate 0x00 clears register", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(20, 0xAB);
+    cpu.exec_andi(encode_andi(20, 0x00));
+
+    REQUIRE(cpu.reg(20) == 0x00);
+}
+
+TEST_CASE("ANDI - immediate 0xFF is identity (register unchanged)", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(18, 0x5A);
+    cpu.exec_andi(encode_andi(18, 0xFF));
+
+    REQUIRE(cpu.reg(18) == 0x5A);
+}
+
+TEST_CASE("ANDI - masks out high nibble", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0xCD);
+    cpu.exec_andi(encode_andi(16, 0x0F)); // 0xCD & 0x0F = 0x0D
+
+    REQUIRE(cpu.reg(16) == 0x0D);
+}
+
+TEST_CASE("ANDI - masks out low nibble", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0xCD);
+    cpu.exec_andi(encode_andi(16, 0xF0)); // 0xCD & 0xF0 = 0xC0
+
+    REQUIRE(cpu.reg(16) == 0xC0);
+}
+
+TEST_CASE("ANDI - correct destination register selected (R16)", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0xFF);
+    cpu.set_reg(17, 0xFF); // decoy
+    cpu.exec_andi(encode_andi(16, 0x00));
+
+    REQUIRE(cpu.reg(16) == 0x00);
+    REQUIRE(cpu.reg(17) == 0xFF); // decoy unchanged
+}
+
+TEST_CASE("ANDI - correct destination register selected (R31)", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(31, 0xFF);
+    cpu.set_reg(30, 0xFF); // decoy
+    cpu.exec_andi(encode_andi(31, 0x55));
+
+    REQUIRE(cpu.reg(31) == 0x55);
+    REQUIRE(cpu.reg(30) == 0xFF); // decoy unchanged
+}
+
+TEST_CASE("ANDI - correct destination register selected (R24, mid-range)", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(24, 0b10110011);
+    cpu.exec_andi(encode_andi(24, 0b11110000));
+
+    REQUIRE(cpu.reg(24) == 0b10110000);
+}
+
+// ---------------------------------------------------------------------------
+// Immediate decode tests
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ANDI - K high nibble decoded correctly", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0xFF);
+    cpu.exec_andi(encode_andi(16, 0xA0)); // K = 0xA0: only high nibble set
+
+    REQUIRE(cpu.reg(16) == 0xA0);
+}
+
+TEST_CASE("ANDI - K low nibble decoded correctly", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0xFF);
+    cpu.exec_andi(encode_andi(16, 0x0B)); // K = 0x0B: only low nibble set
+
+    REQUIRE(cpu.reg(16) == 0x0B);
+}
+
+// ---------------------------------------------------------------------------
+// Z flag (Zero)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ANDI - Z set when result is zero", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0xF0);
+    cpu.exec_andi(encode_andi(16, 0x0F)); // 0xF0 & 0x0F = 0x00
+
+    REQUIRE((cpu.sreg() & SREG_Z) != 0);
+}
+
+TEST_CASE("ANDI - Z cleared when result is non-zero", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(SREG_Z); // pre-set Z
+    cpu.set_reg(16, 0xFF);
+    cpu.exec_andi(encode_andi(16, 0x01));
+
+    REQUIRE((cpu.sreg() & SREG_Z) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// N flag (Negative)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ANDI - N set when result bit 7 is set", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0xFF);
+    cpu.exec_andi(encode_andi(16, 0x80)); // result = 0x80 → bit 7 set
+
+    REQUIRE((cpu.sreg() & SREG_N) != 0);
+}
+
+TEST_CASE("ANDI - N cleared when result bit 7 is clear", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(SREG_N); // pre-set N
+    cpu.set_reg(16, 0xFF);
+    cpu.exec_andi(encode_andi(16, 0x7F)); // result = 0x7F → bit 7 clear
+
+    REQUIRE((cpu.sreg() & SREG_N) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// V flag (Overflow) — always cleared
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ANDI - V always cleared (result negative)", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(SREG_V); // pre-set V
+    cpu.set_reg(16, 0xFF);
+    cpu.exec_andi(encode_andi(16, 0x80)); // result = 0x80
+
+    REQUIRE((cpu.sreg() & SREG_V) == 0);
+}
+
+TEST_CASE("ANDI - V always cleared (result zero)", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(SREG_V); // pre-set V
+    cpu.set_reg(16, 0x00);
+    cpu.exec_andi(encode_andi(16, 0xFF));
+
+    REQUIRE((cpu.sreg() & SREG_V) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// S flag (Sign = N XOR V = N since V=0)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ANDI - S set when N=1 (V=0)", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0xFF);
+    cpu.exec_andi(encode_andi(16, 0x80)); // N=1, V=0 → S=1
+
+    REQUIRE((cpu.sreg() & SREG_S) != 0);
+}
+
+TEST_CASE("ANDI - S cleared when N=0 (V=0)", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(SREG_S); // pre-set S
+    cpu.set_reg(16, 0xFF);
+    cpu.exec_andi(encode_andi(16, 0x01)); // N=0, V=0 → S=0
+
+    REQUIRE((cpu.sreg() & SREG_S) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// C and H flags — unaffected
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ANDI - C flag unaffected (was set)", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(SREG_C);
+    cpu.set_reg(16, 0xFF);
+    cpu.exec_andi(encode_andi(16, 0x01));
+
+    REQUIRE((cpu.sreg() & SREG_C) != 0);
+}
+
+TEST_CASE("ANDI - C flag unaffected (was clear)", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0x00);
+    cpu.set_reg(16, 0xFF);
+    cpu.exec_andi(encode_andi(16, 0x01));
+
+    REQUIRE((cpu.sreg() & SREG_C) == 0);
+}
+
+TEST_CASE("ANDI - H flag unaffected (was set)", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(SREG_H);
+    cpu.set_reg(16, 0xFF);
+    cpu.exec_andi(encode_andi(16, 0x01));
+
+    REQUIRE((cpu.sreg() & SREG_H) != 0);
+}
+
+TEST_CASE("ANDI - H flag unaffected (was clear)", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_sreg(0x00);
+    cpu.set_reg(16, 0xFF);
+    cpu.exec_andi(encode_andi(16, 0x01));
+
+    REQUIRE((cpu.sreg() & SREG_H) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// Cycle count
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ANDI - returns 1 cycle", "[andi][alu]")
+{
+    auto cfg = make_test_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+
+    cpu.set_reg(16, 0xFF);
+    u8 cycles = cpu.exec_andi(encode_andi(16, 0x01));
+
+    REQUIRE(cycles == 1u);
+}

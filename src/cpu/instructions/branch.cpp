@@ -168,4 +168,23 @@ u8 AvrCpu::exec_icall(u16 opcode) {
     return cfg_.has_22_bit_pc ? 4 : 3;
 }
 
+u8 AvrCpu::exec_sbrs(u16 opcode) {
+    // TODO: Unit tests
+    // SBRS
+    // 1111 111r rrrr 0bbb
+    u8 r = (opcode >> 4) & 0x1F;
+    u8 b = opcode & 0x07;
+
+    if (!(reg(r) & (1 << b))) { 
+        return 1;
+    }
+
+    u16 next_opcode = mem_.fetch16(pc());
+    const InstructionDesc* desc = lookup_instruction(next_opcode);
+    bool next_is_two_word = desc && desc->is_two_word;
+
+    set_pc(pc() + (next_is_two_word ? 4 : 2));
+    return next_is_two_word ? 3 : 2;
+}
+
 } // namespace avrion

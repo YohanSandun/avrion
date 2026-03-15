@@ -281,6 +281,7 @@ u8 AvrCpu::exec_st_z_disp(u16 opcode) {
 }
 
 u8 AvrCpu::exec_st_y(u16 opcode) {
+    // TODO: Unit tests
     // ST Y
     // 1000 001r rrrr 1000
     u8 r = reg((opcode & 0x01F0) >> 4);
@@ -289,6 +290,7 @@ u8 AvrCpu::exec_st_y(u16 opcode) {
 }
 
 u8 AvrCpu::exec_st_y_post_inc(u16 opcode) {
+    // TODO: Unit tests
     // ST Y+
     // 1001 001r rrrr 1001
     u8 r = reg((opcode & 0x01F0) >> 4);
@@ -299,6 +301,7 @@ u8 AvrCpu::exec_st_y_post_inc(u16 opcode) {
 }
 
 u8 AvrCpu::exec_st_y_pre_dec(u16 opcode) {
+    // TODO: Unit tests
     // ST -Y
     // 1001 001r rrrr 1010
     u8 r = reg((opcode & 0x01F0) >> 4);
@@ -309,6 +312,7 @@ u8 AvrCpu::exec_st_y_pre_dec(u16 opcode) {
 }
 
 u8 AvrCpu::exec_st_y_disp(u16 opcode) {
+    // TODO: Unit tests
     // ST Y+q
     // 10q0 qq1r rrrr 1qqq
     u8 r = reg((opcode & 0x01F0) >> 4);

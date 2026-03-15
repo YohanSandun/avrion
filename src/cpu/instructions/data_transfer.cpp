@@ -55,7 +55,7 @@ u8 AvrCpu::exec_st_x_pre_dec(u16 opcode) {
     u16 addr = x() - 1;
     set_x(addr);
     mem_.write8(addr, r);
-    return 1;
+    return 2;
 }
 
 u8 AvrCpu::exec_lds(u16 opcode) {
@@ -240,6 +240,43 @@ u8 AvrCpu::exec_ld_z_disp(u16 opcode) {
     u8 d = (opcode & 0x01F0) >> 4;
     u8 q = ((opcode & 0x2000) >> 8) | ((opcode & 0xC00) >> 7) | (opcode & 0x0007);
     set_reg(d, mem_.read8(z() + q));
+    return 2;
+}
+
+u8 AvrCpu::exec_st_z(u16 opcode) {
+    // ST Z
+    // 1000 001r rrrr 0000
+    u8 r = reg((opcode & 0x01F0) >> 4);
+    mem_.write8(z(), r);
+    return 1;
+}
+
+u8 AvrCpu::exec_st_z_post_inc(u16 opcode) {
+    // ST Z+
+    // 1001 001r rrrr 0001
+    u8 r = reg((opcode & 0x01F0) >> 4);
+    u16 addr = z();
+    mem_.write8(addr, r);
+    set_z(addr + 1);
+    return 1;
+}
+
+u8 AvrCpu::exec_st_z_pre_dec(u16 opcode) {
+    // ST -Z
+    // 1001 001r rrrr 0010
+    u8 r = reg((opcode & 0x01F0) >> 4);
+    u16 addr = z() - 1;
+    set_z(addr);
+    mem_.write8(addr, r);
+    return 2;
+}
+
+u8 AvrCpu::exec_st_z_disp(u16 opcode) {
+    // ST Z+q
+    // 10q0 qq1r rrrr 0qqq
+    u8 r = reg((opcode & 0x01F0) >> 4);
+    u8 q = ((opcode & 0x2000) >> 8) | ((opcode & 0xC00) >> 7) | (opcode & 0x0007);
+    mem_.write8(z() + q, r);
     return 2;
 }
 

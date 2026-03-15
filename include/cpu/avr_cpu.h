@@ -93,6 +93,10 @@ public:
   u8 exec_ld_z_post_inc(u16 opcode);
   u8 exec_ld_z_pre_dec(u16 opcode);
   u8 exec_ld_z_disp(u16 opcode);
+  u8 exec_st_z(u16 opcode);
+  u8 exec_st_z_post_inc(u16 opcode);
+  u8 exec_st_z_pre_dec(u16 opcode);
+  u8 exec_st_z_disp(u16 opcode);
 
   // Branching
   u8 exec_jmp(u16 opcode);

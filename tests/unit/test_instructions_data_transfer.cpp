@@ -3423,3 +3423,516 @@ TEST_CASE("LD Z+q - flags not affected", "[ld_z_disp][data_transfer]")
 
     REQUIRE(cpu.sreg() == sentinel);
 }
+
+// ---------------------------------------------------------------------------
+// ST Z / ST Z+ / ST -Z / ST Z+q
+//
+// ST Z    1000 001r rrrr 0000
+// ST Z+   1001 001r rrrr 0001
+// ST -Z   1001 001r rrrr 0010
+// ST Z+q  10q0 qq1r rrrr 0qqq
+//
+// Standard AVR: ZL = R30 (z_low_reg), ZH = R31 (z_high_reg).
+// Uses make_z_config() which is already defined above.
+// ---------------------------------------------------------------------------
+
+// Encode ST Z, Rr  (1000 001r rrrr 0000)
+static u16 encode_st_z(u8 r)
+{
+    return static_cast<u16>(0x8200 | ((r & 0x1F) << 4));
+}
+
+// Encode ST Z+, Rr  (1001 001r rrrr 0001)
+static u16 encode_st_z_post_inc(u8 r)
+{
+    return static_cast<u16>(0x9201 | ((r & 0x1F) << 4));
+}
+
+// Encode ST -Z, Rr  (1001 001r rrrr 0010)
+static u16 encode_st_z_pre_dec(u8 r)
+{
+    return static_cast<u16>(0x9202 | ((r & 0x1F) << 4));
+}
+
+// Encode ST Z+q, Rr  (10q0 qq1r rrrr 0qqq)
+static u16 encode_st_z_disp(u8 r, u8 q)
+{
+    return static_cast<u16>(0x8200
+        | ((r & 0x1F) << 4)
+        | ((q & 0x20) << 8)   // q[5] -> bit 13
+        | ((q & 0x18) << 7)   // q[4:3] -> bits 11:10
+        | (q & 0x07));        // q[2:0] -> bits 2:0
+}
+
+// ---------------------------------------------------------------------------
+// ST Z
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ST Z - writes Rr value to memory at Z address", "[st_z][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x10); // Z = 0x0110
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(5, 0xAB);
+    cpu.exec_st_z(encode_st_z(5));
+
+    REQUIRE(mem.read8(0x0110) == 0xAB);
+}
+
+TEST_CASE("ST Z - writes zero value correctly", "[st_z][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x05); // Z = 0x0105
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(2, 0x00);
+    cpu.exec_st_z(encode_st_z(2));
+
+    REQUIRE(mem.read8(0x0105) == 0x00);
+}
+
+TEST_CASE("ST Z - correct source register selected (R0)", "[st_z][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(0,  0x11);
+    cpu.set_reg(1,  0x22); // decoy
+    cpu.exec_st_z(encode_st_z(0));
+
+    REQUIRE(mem.read8(0x0100) == 0x11);
+}
+
+TEST_CASE("ST Z - correct source register selected (R29, adjacent to Z regs)", "[st_z][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(29, 0xCC);
+    cpu.set_reg(28, 0xFF); // decoy
+    cpu.exec_st_z(encode_st_z(29));
+
+    REQUIRE(mem.read8(0x0100) == 0xCC);
+}
+
+TEST_CASE("ST Z - source register not modified", "[st_z][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(8, 0x55);
+    cpu.exec_st_z(encode_st_z(8));
+
+    REQUIRE(cpu.reg(8) == 0x55);
+}
+
+TEST_CASE("ST Z - Z pointer registers not modified", "[st_z][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x0F); // Z = 0x010F
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(9, 0x44);
+    cpu.exec_st_z(encode_st_z(9));
+
+    REQUIRE(cpu.reg(30) == 0x0F);
+    REQUIRE(cpu.reg(31) == 0x01);
+}
+
+TEST_CASE("ST Z - flags not affected", "[st_z][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    constexpr u8 sentinel = 0b11001010;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(7, 0x12);
+    cpu.exec_st_z(encode_st_z(7));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+// ---------------------------------------------------------------------------
+// ST Z+
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ST Z+ - writes Rr value to memory at Z address", "[st_z_post_inc][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(5, 0xAB);
+    cpu.exec_st_z_post_inc(encode_st_z_post_inc(5));
+
+    REQUIRE(mem.read8(0x0100) == 0xAB);
+}
+
+TEST_CASE("ST Z+ - Z is incremented by 1 after store", "[st_z_post_inc][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(3, 0x55);
+    cpu.exec_st_z_post_inc(encode_st_z_post_inc(3));
+
+    REQUIRE(cpu.reg(30) == 0x01); // ZL incremented
+    REQUIRE(cpu.reg(31) == 0x01); // ZH unchanged
+}
+
+TEST_CASE("ST Z+ - write happens before increment (store at original address)", "[st_z_post_inc][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x05); // Z = 0x0105
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(4, 0x77);
+    cpu.exec_st_z_post_inc(encode_st_z_post_inc(4));
+
+    REQUIRE(mem.read8(0x0105) == 0x77);  // stored at original Z
+    REQUIRE(mem.read8(0x0106) == 0x00);  // incremented address untouched
+}
+
+TEST_CASE("ST Z+ - ZL wraps and carries into ZH on 0xFF->0x00 boundary", "[st_z_post_inc][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    // Z = 0x01FF → store here, then Z becomes 0x0200
+    cpu.set_reg(30, 0xFF); // ZL
+    cpu.set_reg(31, 0x01); // ZH
+    cpu.set_reg(2, 0x99);
+    cpu.exec_st_z_post_inc(encode_st_z_post_inc(2));
+
+    REQUIRE(mem.read8(0x01FF) == 0x99);
+    REQUIRE(cpu.reg(30) == 0x00); // ZL wrapped
+    REQUIRE(cpu.reg(31) == 0x02); // ZH carried
+}
+
+TEST_CASE("ST Z+ - source register not modified", "[st_z_post_inc][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(6, 0xBE);
+    cpu.exec_st_z_post_inc(encode_st_z_post_inc(6));
+
+    REQUIRE(cpu.reg(6) == 0xBE);
+}
+
+TEST_CASE("ST Z+ - flags not affected", "[st_z_post_inc][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    constexpr u8 sentinel = 0b10100101;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(6, 0x34);
+    cpu.exec_st_z_post_inc(encode_st_z_post_inc(6));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+// ---------------------------------------------------------------------------
+// ST -Z
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ST -Z - writes Rr value to memory at decremented Z address", "[st_z_pre_dec][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x01); // Z = 0x0101 -> pre-dec -> store at 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(5, 0xAB);
+    cpu.exec_st_z_pre_dec(encode_st_z_pre_dec(5));
+
+    REQUIRE(mem.read8(0x0100) == 0xAB);
+}
+
+TEST_CASE("ST -Z - Z is decremented by 1 before store", "[st_z_pre_dec][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x05); // Z = 0x0105 -> pre-dec -> Z = 0x0104
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(3, 0x55);
+    cpu.exec_st_z_pre_dec(encode_st_z_pre_dec(3));
+
+    REQUIRE(cpu.reg(30) == 0x04); // ZL decremented
+    REQUIRE(cpu.reg(31) == 0x01); // ZH unchanged
+}
+
+TEST_CASE("ST -Z - decrement before write (store at Z-1, not original Z)", "[st_z_pre_dec][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x0A); // Z = 0x010A -> pre-dec -> store at 0x0109
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(4, 0x77);
+    cpu.exec_st_z_pre_dec(encode_st_z_pre_dec(4));
+
+    REQUIRE(mem.read8(0x0109) == 0x77);  // stored at decremented address
+    REQUIRE(mem.read8(0x010A) == 0x00);  // original address untouched
+}
+
+TEST_CASE("ST -Z - ZL borrows from ZH on 0x00->0xFF boundary", "[st_z_pre_dec][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    // Z = 0x0200 -> pre-dec -> store at 0x01FF
+    cpu.set_reg(30, 0x00); // ZL
+    cpu.set_reg(31, 0x02); // ZH
+    cpu.set_reg(2, 0x99);
+    cpu.exec_st_z_pre_dec(encode_st_z_pre_dec(2));
+
+    REQUIRE(mem.read8(0x01FF) == 0x99);
+    REQUIRE(cpu.reg(30) == 0xFF); // ZL borrowed
+    REQUIRE(cpu.reg(31) == 0x01); // ZH decremented
+}
+
+TEST_CASE("ST -Z - source register not modified", "[st_z_pre_dec][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x01); // Z = 0x0101 -> store at 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(8, 0x55);
+    cpu.exec_st_z_pre_dec(encode_st_z_pre_dec(8));
+
+    REQUIRE(cpu.reg(8) == 0x55);
+}
+
+TEST_CASE("ST -Z - flags not affected", "[st_z_pre_dec][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    constexpr u8 sentinel = 0b01011010;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(30, 0x01); // Z = 0x0101 -> store at 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(7, 0x12);
+    cpu.exec_st_z_pre_dec(encode_st_z_pre_dec(7));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}
+
+// ---------------------------------------------------------------------------
+// ST Z+q
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ST Z+q - writes to address Z+q (q=0 writes to Z directly)", "[st_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(5, 0xAB);
+    cpu.exec_st_z_disp(encode_st_z_disp(5, 0));
+
+    REQUIRE(mem.read8(0x0100) == 0xAB);
+}
+
+TEST_CASE("ST Z+q - writes to address Z+q (q=1)", "[st_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(3, 0x22);
+    cpu.exec_st_z_disp(encode_st_z_disp(3, 1));
+
+    REQUIRE(mem.read8(0x0101) == 0x22);
+}
+
+TEST_CASE("ST Z+q - writes to address Z+q (q=7, tests low q bits)", "[st_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(10, 0xCC);
+    cpu.exec_st_z_disp(encode_st_z_disp(10, 7));
+
+    REQUIRE(mem.read8(0x0107) == 0xCC);
+}
+
+TEST_CASE("ST Z+q - writes to address Z+q (q=8, tests bit q[3])", "[st_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(6, 0xDD);
+    cpu.exec_st_z_disp(encode_st_z_disp(6, 8));
+
+    REQUIRE(mem.read8(0x0108) == 0xDD);
+}
+
+TEST_CASE("ST Z+q - writes to address Z+q (q=16, tests bit q[4])", "[st_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(1, 0xEE);
+    cpu.exec_st_z_disp(encode_st_z_disp(1, 16));
+
+    REQUIRE(mem.read8(0x0110) == 0xEE);
+}
+
+TEST_CASE("ST Z+q - writes to address Z+q (q=32, tests bit q[5])", "[st_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(2, 0x99);
+    cpu.exec_st_z_disp(encode_st_z_disp(2, 32));
+
+    REQUIRE(mem.read8(0x0120) == 0x99);
+}
+
+TEST_CASE("ST Z+q - writes to address Z+q (q=63, maximum displacement)", "[st_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(15, 0x77);
+    cpu.exec_st_z_disp(encode_st_z_disp(15, 63)); // 0x0100 + 63 = 0x013F
+
+    REQUIRE(mem.read8(0x013F) == 0x77);
+}
+
+TEST_CASE("ST Z+q - Z pointer registers not modified", "[st_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x02); // Z = 0x0102
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(5, 0x55);
+    cpu.exec_st_z_disp(encode_st_z_disp(5, 11)); // 0x0102 + 11 = 0x010D
+
+    REQUIRE(cpu.reg(30) == 0x02);
+    REQUIRE(cpu.reg(31) == 0x01);
+}
+
+TEST_CASE("ST Z+q - source register not modified", "[st_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(4, 0xBB);
+    cpu.exec_st_z_disp(encode_st_z_disp(4, 5));
+
+    REQUIRE(cpu.reg(4) == 0xBB);
+}
+
+TEST_CASE("ST Z+q - flags not affected", "[st_z_disp][data_transfer]")
+{
+    auto cfg = make_z_config();
+    MemoryMap mem{cfg};
+    AvrCpu    cpu{mem, cfg};
+    mem.attach_cpu(&cpu);
+
+    constexpr u8 sentinel = 0b11010011;
+    cpu.set_sreg(sentinel);
+    cpu.set_reg(30, 0x00); // Z = 0x0100
+    cpu.set_reg(31, 0x01);
+    cpu.set_reg(12, 0xAA);
+    cpu.exec_st_z_disp(encode_st_z_disp(12, 4));
+
+    REQUIRE(cpu.sreg() == sentinel);
+}

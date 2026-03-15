@@ -16,7 +16,14 @@ public:
     // Throws std::runtime_error if the file cannot be opened.
     static std::vector<uint8_t> decodeFile(const std::string& filePath);
 
+    // Decodes Intel HEX content supplied as a string (e.g. from a browser
+    // FileReader). Equivalent to decodeFile but reads from an in-memory buffer.
+    static std::vector<uint8_t> decodeString(const std::string& hexContent);
+
 private:
+    // Shared decode loop operating on any std::istream.
+    static std::vector<uint8_t> decodeLinesFrom(std::istream& stream);
+
     // Converts a raw data field (hex string of 2*N chars) into bytes.
     // Bytes are read sequentially — Intel HEX already stores them in
     // the correct memory order for AVR targets.

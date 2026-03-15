@@ -9,6 +9,7 @@ Thumbs.db
 
 # ---- CMake build outputs ----
 build/
+build_wasm/
 cmake-build-*/
 CMakeFiles/
 CMakeCache.txt

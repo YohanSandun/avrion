@@ -45,7 +45,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: apps/wasm/web/build
+          path: apps/wasm/web/dist
 
   deploy:
     environment:
